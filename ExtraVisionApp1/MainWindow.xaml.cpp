@@ -33,11 +33,11 @@ namespace winrt::ExtraVisionApp1::implementation
 		auto selectedItem = unbox_value<hstring>(args.SelectedItemContainer().Content());
 		if (selectedItem == L"Home")
 		{
-			openHomePage();
+			OpenHomePage();
 		}
 		else if (selectedItem == L"Cheat")
 		{
-			openCheatPage();
+			OpenCheatPage();
 		}
 	}
 
@@ -60,7 +60,7 @@ namespace winrt::ExtraVisionApp1::implementation
 	{
 		// NavigationView Back 버튼 이벤트 핸들러
 		MainFrame().GoBack();
-		setNavigationViewHeader();
+		SetNavigationViewHeader();
 	}
 
 	void winrt::ExtraVisionApp1::implementation::MainWindow::MainFrame_Navigated(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::Navigation::NavigationEventArgs const&)
@@ -69,21 +69,21 @@ namespace winrt::ExtraVisionApp1::implementation
 		NavView().IsBackEnabled(MainFrame().CanGoBack());
 	}
 
-	void MainWindow::openHomePage()
+	void MainWindow::OpenHomePage()
 	{
 		// Home 페이지 열기
 		MainFrame().Navigate(xaml_typename<HomePage>());
-		setNavigationViewHeader();
+		SetNavigationViewHeader();
 	}
 
-	void MainWindow::openCheatPage()
+	void MainWindow::OpenCheatPage()
 	{
 		// Cheat 페이지 열기
 		MainFrame().Navigate(xaml_typename<CheatPage>());
-		setNavigationViewHeader();
+		SetNavigationViewHeader();
 	}
 
-	void MainWindow::setNavigationViewHeader()
+	void MainWindow::SetNavigationViewHeader()
 	{
 		// NavigationView 헤더 설정
 		auto currentPage = MainFrame().CurrentSourcePageType().Name;

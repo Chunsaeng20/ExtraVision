@@ -6,6 +6,7 @@ namespace winrt::ExtraVisionApp1::implementation
 {
     struct MainWindow : MainWindowT<MainWindow>
     {
+    public:
         MainWindow()
         {
             // Xaml objects should not call InitializeComponent during construction.
@@ -19,9 +20,9 @@ namespace winrt::ExtraVisionApp1::implementation
         void MainFrame_Navigated(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Navigation::NavigationEventArgs const& e);
 
     private:
-        void openHomePage();
-        void openCheatPage();
-        void setNavigationViewHeader();
+        void OpenHomePage();
+        void OpenCheatPage();
+        void SetNavigationViewHeader();
     };
 }
 

@@ -58,7 +58,7 @@
 
                 <Grid Grid.Row="0" Grid.Column="1">
                     <TextBlock HorizontalTextAlignment="Center" Text="프로그램 검색"/>
-                    <Button HorizontalAlignment="Stretch" Content="검색"/>
+                    <Button x:Name="SearchProgramBtn" HorizontalAlignment="Stretch" Content="검색" Click="SearchProgramBtn_Click"/>
                 </Grid>
 
                 <Grid Grid.Row="1" Grid.Column="1">
