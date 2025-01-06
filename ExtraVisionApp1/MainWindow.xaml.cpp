@@ -14,11 +14,16 @@ using namespace Microsoft::UI::Xaml::Controls;
 
 namespace winrt::ExtraVisionApp1::implementation
 {
+	// 정적 변수 초기화
+	HWND MainWindow::m_hWnd{ 0 };
+
 	void MainWindow::InitializeComponent()
 	{
+		// 클래스 초기화
 		MainWindowT::InitializeComponent();
 		ExtendsContentIntoTitleBar(true);
 		SetTitleBar(TitleBarArea());
+		SetWindowHandle();
 	}
 
 	void winrt::ExtraVisionApp1::implementation::MainWindow::NavView_Loaded(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&)
@@ -96,5 +101,18 @@ namespace winrt::ExtraVisionApp1::implementation
 		{
 			NavView().Header(box_value(L"Cheat"));
 		}
+	}
+
+	void MainWindow::SetWindowHandle()
+	{
+		// 윈도우 핸들 설정하기
+		auto windowNative{ this->m_inner.as<IWindowNative>() };
+		windowNative->get_WindowHandle(&m_hWnd);
+	}
+
+	HWND MainWindow::GetWindowHandle()
+	{
+		// 윈도우 핸들 가져오기
+		return m_hWnd;
 	}
 }

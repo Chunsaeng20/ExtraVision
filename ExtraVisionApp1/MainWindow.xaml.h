@@ -18,8 +18,11 @@ namespace winrt::ExtraVisionApp1::implementation
         void NavView_DisplayModeChanged(winrt::Microsoft::UI::Xaml::Controls::NavigationView const& sender, winrt::Microsoft::UI::Xaml::Controls::NavigationViewDisplayModeChangedEventArgs const& args);
         void NavView_BackRequested(winrt::Microsoft::UI::Xaml::Controls::NavigationView const& sender, winrt::Microsoft::UI::Xaml::Controls::NavigationViewBackRequestedEventArgs const& args);
         void MainFrame_Navigated(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Navigation::NavigationEventArgs const& e);
+        static HWND GetWindowHandle();
 
     private:
+        static HWND m_hWnd;
+        void SetWindowHandle();
         void OpenHomePage();
         void OpenCheatPage();
         void SetNavigationViewHeader();

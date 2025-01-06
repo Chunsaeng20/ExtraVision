@@ -5,6 +5,7 @@
 #endif
 #include <winrt/Windows.Graphics.Capture.h>
 #include <shobjidl_core.h>
+#include "MainWindow.xaml.h"
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -25,12 +26,12 @@ namespace winrt::ExtraVisionApp1::implementation
 			if (toggleSwitch.IsOn())
 			{
 				// AI ON
-				this->m_isAIOn = true;
+				this->m_isAIOn.store(true);
 			}
 			else
 			{
 				// AI OFF
-				this->m_isAIOn = false;
+				this->m_isAIOn.store(false);
 			}
 		}
 	}
@@ -44,12 +45,12 @@ namespace winrt::ExtraVisionApp1::implementation
 			if (toggleSwitch.IsOn())
 			{
 				// Log ON
-				this->m_isLogOn = true;
+				this->m_isLogOn.store(true);
 			}
 			else
 			{
 				// Log OFF
-				this->m_isLogOn = false;
+				this->m_isLogOn.store(false);
 			}
 		}
 	}
@@ -70,17 +71,14 @@ namespace winrt::ExtraVisionApp1::implementation
 	winrt::fire_and_forget CheatPage::OpenWindowList()
 	{
 		// 윈도우 핸들 가져오기
-		auto windowNative{ this->m_inner.as<::IWindowNative>() };
-		HWND hwnd{ 0 };
-		windowNative->get_WindowHandle(&hwnd);
+		HWND hWnd = MainWindow::GetWindowHandle();
 
 		// GraphicsCapturePicker 초기화
 		auto picker = GraphicsCapturePicker();
-		auto initializeWithWindow = picker.as<IInitializeWithWindow>();
-		initializeWithWindow->Initialize(hwnd);
+		picker.as<IInitializeWithWindow>()->Initialize(hWnd);
 
 		// 아이템 가져오기
-		auto item{ co_await picker.PickSingleItemAsync() };
+		auto item = co_await picker.PickSingleItemAsync();
 		if (item != nullptr)
 		{
 			m_item = item;
