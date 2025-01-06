@@ -21,13 +21,13 @@ namespace winrt::ExtraVisionApp1::implementation
 		SetTitleBar(TitleBarArea());
 	}
 
-	void winrt::ExtraVisionApp1::implementation::MainWindow::NavView_Loaded(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
+	void winrt::ExtraVisionApp1::implementation::MainWindow::NavView_Loaded(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&)
 	{
 		// 초기 화면 설정
 		NavView().SelectedItem(NavView().MenuItems().GetAt(0));
 	}
 
-	void winrt::ExtraVisionApp1::implementation::MainWindow::NavView_SelectionChanged(winrt::Microsoft::UI::Xaml::Controls::NavigationView const& sender, winrt::Microsoft::UI::Xaml::Controls::NavigationViewSelectionChangedEventArgs const& args)
+	void winrt::ExtraVisionApp1::implementation::MainWindow::NavView_SelectionChanged(winrt::Microsoft::UI::Xaml::Controls::NavigationView const&, winrt::Microsoft::UI::Xaml::Controls::NavigationViewSelectionChangedEventArgs const& args)
 	{
 		// NavigationView 이벤트 핸들러
 		auto selectedItem = unbox_value<hstring>(args.SelectedItemContainer().Content());
@@ -41,7 +41,7 @@ namespace winrt::ExtraVisionApp1::implementation
 		}
 	}
 
-	void winrt::ExtraVisionApp1::implementation::MainWindow::NavView_DisplayModeChanged(winrt::Microsoft::UI::Xaml::Controls::NavigationView const& sender, winrt::Microsoft::UI::Xaml::Controls::NavigationViewDisplayModeChangedEventArgs const& args)
+	void winrt::ExtraVisionApp1::implementation::MainWindow::NavView_DisplayModeChanged(winrt::Microsoft::UI::Xaml::Controls::NavigationView const& sender, winrt::Microsoft::UI::Xaml::Controls::NavigationViewDisplayModeChangedEventArgs const&)
 	{
 		// 반응형 타이틀바
 		auto top = unbox_value<Grid>(Content());
@@ -56,14 +56,14 @@ namespace winrt::ExtraVisionApp1::implementation
 		titleBar.Margin(thickness);
 	}
 
-	void winrt::ExtraVisionApp1::implementation::MainWindow::NavView_BackRequested(winrt::Microsoft::UI::Xaml::Controls::NavigationView const& sender, winrt::Microsoft::UI::Xaml::Controls::NavigationViewBackRequestedEventArgs const& args)
+	void winrt::ExtraVisionApp1::implementation::MainWindow::NavView_BackRequested(winrt::Microsoft::UI::Xaml::Controls::NavigationView const&, winrt::Microsoft::UI::Xaml::Controls::NavigationViewBackRequestedEventArgs const&)
 	{
 		// NavigationView Back 버튼 이벤트 핸들러
 		MainFrame().GoBack();
 		setNavigationViewHeader();
 	}
 
-	void winrt::ExtraVisionApp1::implementation::MainWindow::MainFrame_Navigated(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::Navigation::NavigationEventArgs const& e)
+	void winrt::ExtraVisionApp1::implementation::MainWindow::MainFrame_Navigated(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::Navigation::NavigationEventArgs const&)
 	{
 		// NavigationView Back 버튼 활성화
 		NavView().IsBackEnabled(MainFrame().CanGoBack());

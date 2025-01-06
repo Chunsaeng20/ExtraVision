@@ -13,7 +13,7 @@ using namespace Microsoft::UI::Xaml::Controls;
 
 namespace winrt::ExtraVisionApp1::implementation
 {
-	void winrt::ExtraVisionApp1::implementation::CheatPage::CheatSwitch_Toggled(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
+	void winrt::ExtraVisionApp1::implementation::CheatPage::CheatSwitch_Toggled(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&)
 	{
 		auto toggleSwitch = sender.as<ToggleSwitch>();
 		if (toggleSwitch != NULL)
@@ -29,7 +29,7 @@ namespace winrt::ExtraVisionApp1::implementation
 		}
 	}
 
-	void winrt::ExtraVisionApp1::implementation::CheatPage::LogSwitch_Toggled(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e)
+	void winrt::ExtraVisionApp1::implementation::CheatPage::LogSwitch_Toggled(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&)
 	{
 		auto toggleSwitch = sender.as<ToggleSwitch>();
 		if (toggleSwitch != NULL)
