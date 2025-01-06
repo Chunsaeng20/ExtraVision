@@ -1,0 +1,8 @@
+namespace ExtraVisionApp1
+{
+    [default_interface]
+    runtimeclass CheatPage : Microsoft.UI.Xaml.Controls.Page
+    {
+        CheatPage();
+    }
+}
