@@ -15,6 +15,7 @@ namespace winrt::ExtraVisionApp1::implementation
             // Xaml objects should not call InitializeComponent during construction.
             // See https://github.com/microsoft/cppwinrt/tree/master/nuget#initializecomponent
         }
+        void InitializeComponent();
         void CheatSwitch_Toggled(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
         void LogSwitch_Toggled(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
         void SearchProgramBtn_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
@@ -22,6 +23,8 @@ namespace winrt::ExtraVisionApp1::implementation
     private:
         std::atomic<bool> m_isAIOn = false;
         std::atomic<bool> m_isLogOn = false;
+        std::atomic<bool> m_isItemExist = false;
+
         winrt::Windows::Graphics::Capture::GraphicsCaptureItem m_item{ nullptr };
         winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool m_framePool{ nullptr };
         winrt::Windows::Graphics::Capture::GraphicsCaptureSession m_session{ nullptr };
@@ -36,6 +39,7 @@ namespace winrt::ExtraVisionApp1::implementation
 
         winrt::fire_and_forget OpenWindowList();
         winrt::fire_and_forget ShowErrorMsg();
+        Windows::Foundation::IAsyncAction BackgroundTask();
         // BackgroundTask();
         // --ShowWindowImage();
         // --ProcessWithYOLO();

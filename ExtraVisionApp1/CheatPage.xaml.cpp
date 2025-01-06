@@ -17,6 +17,13 @@ using namespace winrt::Windows::Graphics::Capture;
 
 namespace winrt::ExtraVisionApp1::implementation
 {
+	void CheatPage::InitializeComponent()
+	{
+		// 클래스 초기화
+		CheatPageT::InitializeComponent();
+		BackgroundTask();
+	}
+
 	void winrt::ExtraVisionApp1::implementation::CheatPage::CheatSwitch_Toggled(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&)
 	{
 		// AI 토글 버튼 이벤트 핸들러
@@ -82,16 +89,34 @@ namespace winrt::ExtraVisionApp1::implementation
 		if (item != nullptr)
 		{
 			m_item = item;
+			m_isItemExist.store(true);
 		}
 	}
 
 	winrt::fire_and_forget CheatPage::ShowErrorMsg()
 	{
+		// 윈도우가 GraphicsCapture를 지원하지 않을 때의 에러 메시지
 		ContentDialog dialog{};
 		dialog.XamlRoot(this->Content().XamlRoot());
 		dialog.Title(box_value(L"오류"));
-		dialog.Content(box_value(L"이 기기는 화면 캡쳐가 지원되지 않습니다."));
+		dialog.Content(box_value(L"이 기기는 화면 캡쳐를 지원하지 않습니다."));
 		dialog.CloseButtonText(L"닫기");
 		co_await dialog.ShowAsync();
+	}
+
+	Windows::Foundation::IAsyncAction CheatPage::BackgroundTask()
+	{
+		// 주요 로직을 실행하는 백그라운드 스레드
+		while (true)
+		{
+			// 백그라운드 스레드에서 실행
+			co_await winrt::resume_background();
+
+			// 아이템이 존재할 때만 로직 실행 가능
+			if (m_isItemExist.load())
+			{
+
+			}
+		}
 	}
 }
