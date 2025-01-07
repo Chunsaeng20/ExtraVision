@@ -22,10 +22,12 @@ namespace winrt::ExtraVisionApp1::implementation
 
     private:
         static HWND m_hWnd;
-        void SetWindowHandle();
+
+    private:
         void OpenHomePage();
         void OpenCheatPage();
         void SetNavigationViewHeader();
+        void SetWindowHandle();
     };
 }
 
