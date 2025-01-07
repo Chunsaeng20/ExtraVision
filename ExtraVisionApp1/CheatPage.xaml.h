@@ -37,6 +37,8 @@ namespace winrt::ExtraVisionApp1::implementation
         winrt::Windows::Graphics::SizeInt32 m_lastSize{ 0 };
 
         // Direct3D API
+        winrt::com_ptr<IDXGIDevice> m_dxgiDevice{ nullptr };
+        winrt::com_ptr<ID3D11Device> m_d3dDevice{ nullptr };
         winrt::com_ptr<IDXGISwapChain1> m_swapChain{ nullptr };
         winrt::com_ptr<ID3D11DeviceContext> m_d3dContext{ nullptr };
         winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice m_device{ nullptr };
@@ -47,6 +49,7 @@ namespace winrt::ExtraVisionApp1::implementation
         winrt::fire_and_forget OpenWindowList();
         winrt::fire_and_forget ShowErrorMsg();
         void OnFrameArrived(winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool const& sender, winrt::Windows::Foundation::IInspectable const& args);
+        winrt::fire_and_forget ShowWindowImage(winrt::Windows::Storage::Streams::Buffer);
         Windows::Foundation::IAsyncAction BackgroundTask();
     };
 }

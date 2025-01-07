@@ -6,6 +6,7 @@
 #endif
 #include <shobjidl_core.h>
 #include <winrt/Windows.Graphics.Capture.h>
+#include <winrt/Windows.Storage.Streams.h>
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -24,9 +25,10 @@ namespace winrt::ExtraVisionApp1::implementation
 		CheatPageT::InitializeComponent();
 
 		// Direct3D 초기화
-		auto d3dDevice = CreateD3DDevice();
-		auto dxgiDevice = d3dDevice.as<IDXGIDevice>();
-		m_device = CreateDirect3DDevice(dxgiDevice.get());
+		m_d3dDevice = CreateD3DDevice();
+		m_d3dDevice->GetImmediateContext(m_d3dContext.put());
+		m_dxgiDevice = m_d3dDevice.as<IDXGIDevice>();
+		m_device = CreateDirect3DDevice(m_dxgiDevice.get());
 	}
 
 	void winrt::ExtraVisionApp1::implementation::CheatPage::CheatSwitch_Toggled(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&)
@@ -145,8 +147,8 @@ namespace winrt::ExtraVisionApp1::implementation
 	{
 		// 캡처된 프레임이 프레임 풀에 저장될 때 발생하는 이벤트 핸들러
 		// 주요 로직을 실행하는 백그라운드 스레드
-
-		// 프레임 가져오기
+		// ------------------------------------------------------------
+		// 1. 프레임 가져오기
 		auto frame = sender.TryGetNextFrame();
 		auto frameContentSize = frame.ContentSize();
 
@@ -162,9 +164,50 @@ namespace winrt::ExtraVisionApp1::implementation
 		// Direct3D11CaptureFrame을 ID3D11Texture2D로 변환
 		auto frameSurface = GetDXGIInterfaceFromObject<ID3D11Texture2D>(frame.Surface());
 
-		// ID3D11Texture2D를 Bitmap으로 변환
+		// ID3D11Texture2D에서 CPU로 데이터 추출
+		D3D11_TEXTURE2D_DESC srcDesc = {};
+		frameSurface->GetDesc(&srcDesc);
+
+		D3D11_TEXTURE2D_DESC desc = {};
+		desc.Width = srcDesc.Width;
+		desc.Height = srcDesc.Height;
+		desc.Format = srcDesc.Format;
+		desc.ArraySize = 1;
+		desc.BindFlags = 0;
+		desc.MiscFlags = 0;
+		desc.SampleDesc.Count = 1;
+		desc.SampleDesc.Quality = 0;
+		desc.MipLevels = 1;
+		desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ | D3D11_CPU_ACCESS_WRITE;
+		desc.Usage = D3D11_USAGE_STAGING;
+
+		// CPU에서 사용가능한 변수 생성
+		winrt::com_ptr<ID3D11Texture2D> IDestImage;
+		HRESULT hr = m_d3dDevice->CreateTexture2D(&desc, NULL, IDestImage.put());
+		if (FAILED(hr)) return;
+		if (IDestImage == nullptr) return;
+
+		// CPU에서 사용가능한 변수로 복사
+		m_d3dContext->CopyResource(IDestImage.get(), frameSurface.get());
+
+		// CPU로 데이터 추출
+		D3D11_MAPPED_SUBRESOURCE resource;
+		hr = m_d3dContext->Map(IDestImage.get(), 0, D3D11_MAP_READ, 0, &resource);
+		if (FAILED(hr)) return;
+
+		// 이미지 데이터 추출
+		BYTE* imageData = reinterpret_cast<BYTE*>(resource.pData);
+		UINT imageSize = resource.RowPitch * m_lastSize.Height;
+
+		// 텍스처 언맵
+		m_d3dContext->Unmap(IDestImage.get(), 0);
+
+		// 버퍼에 담기
+		winrt::Windows::Storage::Streams::Buffer buffer(imageSize);
+		memcpy(buffer.data(), imageData, imageSize);
 
 		// Bitmap을 UI에 띄움
+		ShowWindowImage(buffer);
 
 		// 변경된 윈도우의 사이즈를 반영
 		if (newSize)
@@ -172,9 +215,22 @@ namespace winrt::ExtraVisionApp1::implementation
 			m_framePool.Recreate(m_device, DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, m_lastSize);
 		}
 
-		// AI 모델에 넣기 (구현 필요)
+		// ------------------------------------------------------------
+		// 2. AI 모델에 넣기 (구현 필요)
 
-		// 컴퓨터 제어 (구현 필요)
+		// ------------------------------------------------------------
+		// 3. 컴퓨터 제어 (구현 필요)
+	}
+
+	winrt::fire_and_forget CheatPage::ShowWindowImage(winrt::Windows::Storage::Streams::Buffer buffer)
+	{
+		// 스트림으로 변환
+		Windows::Storage::Streams::InMemoryRandomAccessStream stream;
+		co_await stream.WriteAsync(buffer);
+
+		// 이미지 설정
+		//Bmp().SetSourceAsync(stream);
+		co_return;
 	}
 
 	Windows::Foundation::IAsyncAction CheatPage::BackgroundTask()
