@@ -26,6 +26,7 @@ struct __declspec(uuid("905a0fef-bc53-11df-8c49-001e4fc686da")) IBufferByteAcces
 {
 	virtual HRESULT __stdcall Buffer(uint8_t** value) = 0;
 };
+#include <opencv2/opencv.hpp>
 
 // --------------------- 이 위쪽으로 include 할 것 ---------------------
 
@@ -217,28 +218,26 @@ namespace winrt::ExtraVisionApp1::implementation
 		hr = m_d3dContext->Map(IDestImage.get(), subresource, D3D11_MAP_READ_WRITE, 0, &resource);
 		if (FAILED(hr)) return;
 
-		// 이미지 데이터 추출
-		int imageWidth = static_cast<int>(desc.Width);
+		// 이미지 데이터 추출 준비
 		int imageHeight = static_cast<int>(desc.Height);
 		int imageRowPitch = static_cast<int>(resource.RowPitch);
+		int imageWidth = imageRowPitch / 4;
 		int imageSize = imageRowPitch * imageHeight;
 
+		// 이미지 데이터 추출
 		std::vector<BYTE> imageData;
 		imageData.resize(imageSize);
 		BYTE* srcData = reinterpret_cast<BYTE*>(resource.pData);
-		BYTE* destData = imageData.data() + imageSize - imageRowPitch;
-		for (int h = 0; h < imageHeight; ++h)
-		{
-			memcpy_s(destData, imageRowPitch, srcData, imageRowPitch);
-			srcData += resource.RowPitch;
-			destData -= imageRowPitch;
-		}
+		BYTE* destData = imageData.data();
+		memcpy(destData, srcData, imageSize);
 
 		// 텍스처 언맵
 		m_d3dContext->Unmap(IDestImage.get(), 0);
 
-		// 버퍼에 담기
 		// 디버그 용
+		cv::Mat img(imageHeight, imageWidth, CV_8UC4, imageData.data());
+		cv::imshow("debug", img);
+		cv::waitKey();
 		
 		// UI 스레드에서 Bitmap을 UI에 띄움
 		this->DispatcherQueue().TryEnqueue(
