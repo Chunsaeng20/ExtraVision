@@ -1,3 +1,11 @@
+/*
+* CheatPage.xaml.h
+* - 설명: 애플리케이션의 메인 로직을 담당함
+* -     : 프로그램 탐지, YOLO 모델 적용, 프로그램 제어, 로그 남기기 등
+* - 취급: UI 로직을 제외하고 자유롭게 수정 가능
+* -     : 코드를 분리하고 싶다면 새로운 파일을 작성 후 CheatPage.xaml.cpp로 직접 include 할 것
+* -     : 오류가 생기거나 필요한 경우에만 CheatPage.xaml.h에 include 할 것
+*/
 #pragma once
 
 #include "CheatPage.g.h"
@@ -49,8 +57,6 @@ namespace winrt::ExtraVisionApp1::implementation
         winrt::fire_and_forget OpenWindowList();
         winrt::fire_and_forget ShowErrorMsg();
         void OnFrameArrived(winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool const& sender, winrt::Windows::Foundation::IInspectable const& args);
-        winrt::fire_and_forget ShowWindowImage(winrt::Windows::Storage::Streams::Buffer);
-        Windows::Foundation::IAsyncAction BackgroundTask();
     };
 }
 
@@ -60,6 +66,8 @@ namespace winrt::ExtraVisionApp1::factory_implementation
     {
     };
 }
+
+// -------------------------------------------------- Direct3D 관련 메서드 시작 --------------------------------------------------
 
 // DXGI 인터페이스를 가져오는 메서드
 template <typename T>
@@ -101,3 +109,5 @@ inline auto CreateD3DDevice()
     winrt::check_hresult(hr);
     return device;
 }
+
+// -------------------------------------------------- Direct3D 관련 메서드 종료 --------------------------------------------------

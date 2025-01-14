@@ -1,3 +1,17 @@
+/*
+* CheatPage.xaml.h
+* - 설명: 애플리케이션의 메인 로직을 담당함
+* -     : 프로그램 탐지, YOLO 모델 적용, 프로그램 제어, 로그 남기기 등
+* - 취급: UI 로직을 제외하고 자유롭게 수정 가능
+*/
+/*
+* CheatPage.xaml.cpp
+* - 설명: 애플리케이션의 메인 로직을 담당함
+* -     : 프로그램 탐지, YOLO 모델 적용, 프로그램 제어, 로그 남기기 등
+* - 취급: UI 로직을 제외하고 자유롭게 수정 가능
+* -     : 코드를 분리하고 싶다면 새로운 파일을 작성 후 CheatPage.xaml.cpp로 직접 include 할 것
+* -     : 오류가 생기거나 필요한 경우에만 CheatPage.xaml.h에 include 할 것
+*/
 #include "pch.h"
 #include "CheatPage.xaml.h"
 #include "MainWindow.xaml.h"
@@ -7,6 +21,13 @@
 #include <shobjidl_core.h>
 #include <winrt/Windows.Graphics.Capture.h>
 #include <winrt/Windows.Storage.Streams.h>
+#include <winrt/Windows.UI.Xaml.Media.Imaging.h>
+struct __declspec(uuid("905a0fef-bc53-11df-8c49-001e4fc686da")) IBufferByteAccess : ::IUnknown
+{
+	virtual HRESULT __stdcall Buffer(uint8_t** value) = 0;
+};
+
+// --------------------- 이 위쪽으로 include 할 것 ---------------------
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -192,22 +213,40 @@ namespace winrt::ExtraVisionApp1::implementation
 
 		// CPU로 데이터 추출
 		D3D11_MAPPED_SUBRESOURCE resource;
-		hr = m_d3dContext->Map(IDestImage.get(), 0, D3D11_MAP_READ, 0, &resource);
+		UINT subresource = D3D11CalcSubresource(0, 0, 0);
+		hr = m_d3dContext->Map(IDestImage.get(), subresource, D3D11_MAP_READ_WRITE, 0, &resource);
 		if (FAILED(hr)) return;
 
 		// 이미지 데이터 추출
-		BYTE* imageData = reinterpret_cast<BYTE*>(resource.pData);
-		UINT imageSize = resource.RowPitch * m_lastSize.Height;
+		int imageWidth = static_cast<int>(desc.Width);
+		int imageHeight = static_cast<int>(desc.Height);
+		int imageRowPitch = static_cast<int>(resource.RowPitch);
+		int imageSize = imageRowPitch * imageHeight;
+
+		std::vector<BYTE> imageData;
+		imageData.resize(imageSize);
+		BYTE* srcData = reinterpret_cast<BYTE*>(resource.pData);
+		BYTE* destData = imageData.data() + imageSize - imageRowPitch;
+		for (int h = 0; h < imageHeight; ++h)
+		{
+			memcpy_s(destData, imageRowPitch, srcData, imageRowPitch);
+			srcData += resource.RowPitch;
+			destData -= imageRowPitch;
+		}
 
 		// 텍스처 언맵
 		m_d3dContext->Unmap(IDestImage.get(), 0);
 
 		// 버퍼에 담기
-		winrt::Windows::Storage::Streams::Buffer buffer(imageSize);
-		memcpy(buffer.data(), imageData, imageSize);
-
-		// Bitmap을 UI에 띄움
-		ShowWindowImage(buffer);
+		// 디버그 용
+		
+		// UI 스레드에서 Bitmap을 UI에 띄움
+		this->DispatcherQueue().TryEnqueue(
+			Microsoft::UI::Dispatching::DispatcherQueuePriority::Normal,
+			[this]()
+			{
+				// 수행할 작업
+			});
 
 		// 변경된 윈도우의 사이즈를 반영
 		if (newSize)
@@ -220,26 +259,5 @@ namespace winrt::ExtraVisionApp1::implementation
 
 		// ------------------------------------------------------------
 		// 3. 컴퓨터 제어 (구현 필요)
-	}
-
-	winrt::fire_and_forget CheatPage::ShowWindowImage(winrt::Windows::Storage::Streams::Buffer buffer)
-	{
-		// 스트림으로 변환
-		Windows::Storage::Streams::InMemoryRandomAccessStream stream;
-		co_await stream.WriteAsync(buffer);
-
-		// 이미지 설정
-		//Bmp().SetSourceAsync(stream);
-		co_return;
-	}
-
-	Windows::Foundation::IAsyncAction CheatPage::BackgroundTask()
-	{
-		// 주요 로직을 실행하는 백그라운드 스레드
-		while (true)
-		{
-			// 백그라운드 스레드에서 실행
-			co_await winrt::resume_background();
-		}
 	}
 }

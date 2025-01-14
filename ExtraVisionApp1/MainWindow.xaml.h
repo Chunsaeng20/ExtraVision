@@ -1,3 +1,9 @@
+/*
+* MainWindow.xaml.h
+* - 설명: 애플리케이션의 윈도우에 관한 설정을 담당함
+* -     : 특히 타이틀바와 네비게이션뷰와 같은 UI를 담당함
+* - 취급: 건들지 말 것
+*/
 #pragma once
 
 #include "MainWindow.g.h"

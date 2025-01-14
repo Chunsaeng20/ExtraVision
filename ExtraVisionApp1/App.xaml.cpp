@@ -1,3 +1,8 @@
+/*
+* App.xaml.cpp
+* - 설명: 애플리케이션 전반에 관한 설정을 담당함
+* - 취급: 건들지 말 것
+*/
 #include "pch.h"
 #include "App.xaml.h"
 #include "MainWindow.xaml.h"
