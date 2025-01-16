@@ -12,6 +12,12 @@
 #include <d3d11.h>
 #include <dxgi1_2.h>
 #include <winrt/Windows.Graphics.Capture.h>
+#include <opencv2/opencv.hpp>
+#include <YOLO11.hpp>
+
+#define MODELPATH "C:/Users/c/source/repos/ExtraVisionApp1/ExtraVisionApp1/models/yolo11n.onnx"   // YOLO 모델 절대 경로
+#define LABELSPATH "C:/Users/c/source/repos/ExtraVisionApp1/ExtraVisionApp1/models/coco.names"    // 라벨 절대 경로
+#define ISGPU true                          // GPU 사용 여부
 
 namespace winrt::ExtraVisionApp1::implementation
 {
@@ -33,6 +39,9 @@ namespace winrt::ExtraVisionApp1::implementation
         void SearchProgramBtn_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
 
     private:
+        // YOLO 모델
+        YOLO11Detector m_detector{ MODELPATH, LABELSPATH, ISGPU };
+
         // 컨트롤 변수
         std::atomic<bool> m_isAIOn = false;
         std::atomic<bool> m_isItemLoaded = false;

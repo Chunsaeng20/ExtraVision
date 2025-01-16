@@ -20,7 +20,6 @@ struct __declspec(uuid("905a0fef-bc53-11df-8c49-001e4fc686da")) IBufferByteAcces
 {
 	virtual HRESULT __stdcall Buffer(uint8_t** value) = 0;
 };
-#include <opencv2/opencv.hpp>
 
 // --------------------- 이 위쪽으로 include 할 것 ---------------------
 
@@ -228,11 +227,36 @@ namespace winrt::ExtraVisionApp1::implementation
 		// 텍스처 언맵
 		m_d3dContext->Unmap(IDestImage.get(), 0);
 
-		// 디버그 용
-		cv::Mat img(imageHeight, imageWidth, CV_8UC4, imageData.data());
-		cv::imshow("debug", img);
+		// 변경된 윈도우의 사이즈를 반영
+		if (newSize)
+		{
+			m_framePool.Recreate(m_device, DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, m_lastSize);
+		}
+
+		// ------------------------------------------------------------
+		// 2. AI 모델에 넣기
+		// OpenCV Mat 타입으로 변환
+		// - ID3D11Texture2D은 BGRA 4채널
+		// - Row Major를 Column Major로 변환
+		cv::Mat image(imageHeight, imageWidth, CV_8UC4, imageData.data());
+
+		// 객체 탐지
+		std::vector<Detection> detections = m_detector.detect(image);
+
+		// 탐지된 객체를 이미지에 표시
+		cv::Mat boundingImage = image.clone();
+		m_detector.drawBoundingBoxMask(boundingImage, detections);
+
+		// 디버그 코드
+		cv::imshow("원본", image);
+		cv::imshow("후처리", boundingImage);
 		cv::waitKey();
-		
+
+		// ------------------------------------------------------------
+		// 3. 컴퓨터 제어 (구현 필요)
+
+		// ------------------------------------------------------------
+		// 4. UI 제어 (구현 필요)
 		// UI 스레드에서 Bitmap을 UI에 띄움
 		this->DispatcherQueue().TryEnqueue(
 			Microsoft::UI::Dispatching::DispatcherQueuePriority::Normal,
@@ -241,16 +265,10 @@ namespace winrt::ExtraVisionApp1::implementation
 				// 수행할 작업
 			});
 
-		// 변경된 윈도우의 사이즈를 반영
-		if (newSize)
-		{
-			m_framePool.Recreate(m_device, DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, m_lastSize);
-		}
-
 		// ------------------------------------------------------------
-		// 2. AI 모델에 넣기 (구현 필요)
-
-		// ------------------------------------------------------------
-		// 3. 컴퓨터 제어 (구현 필요)
+		// 5. 로그 남기기 (구현 필요)
+		// 영상으로 남기기
+		// cv::VideoWriter 사용
+		// 고정된 화면 크기 필요
 	}
 }
