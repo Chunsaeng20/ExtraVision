@@ -16,6 +16,7 @@
 #include <winrt/Windows.Graphics.Capture.h>
 #include <winrt/Windows.Storage.Streams.h>
 #include <winrt/Windows.UI.Xaml.Media.Imaging.h>
+#include <microsoft.ui.xaml.media.dxinterop.h>
 struct __declspec(uuid("905a0fef-bc53-11df-8c49-001e4fc686da")) IBufferByteAccess : ::IUnknown
 {
 	virtual HRESULT __stdcall Buffer(uint8_t** value) = 0;
@@ -116,9 +117,15 @@ namespace winrt::ExtraVisionApp1::implementation
 			// 가져온 아이템으로 초기화
 			m_item = item;
 			m_lastSize = m_item.Size();
+			m_swapChain = CreateDXGISwapChain(m_d3dDevice, static_cast<uint32_t>(m_lastSize.Width), static_cast<uint32_t>(m_lastSize.Height), static_cast<DXGI_FORMAT>(DirectXPixelFormat::B8G8R8A8UIntNormalized), 2);
 			m_framePool = Direct3D11CaptureFramePool::CreateFreeThreaded(m_device, DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, m_lastSize);
 			m_frameArrived = m_framePool.FrameArrived(auto_revoke, { this, &CheatPage::OnFrameArrived });
 			m_session = m_framePool.CreateCaptureSession(m_item);
+
+			auto panelNative{ ImageFrame().as<ISwapChainPanelNative>() };
+			HRESULT hr = panelNative->SetSwapChain(m_swapChain.get());
+			m_imageFrameWidth = static_cast<int>(ImageFrame().ActualWidth());
+			m_imageFrameHeight = static_cast<int>(ImageFrame().ActualHeight());
 
 			// 동기화
 			m_isItemLoaded.store(true);
@@ -134,7 +141,7 @@ namespace winrt::ExtraVisionApp1::implementation
 		ContentDialog dialog{};
 		dialog.XamlRoot(this->Content().XamlRoot());
 		dialog.Title(box_value(L"오류"));
-		dialog.Content(box_value(L"이 기기는 화면 캡쳐를 지원하지 않습니다."));
+		dialog.Content(box_value(L"이 기기는 화면 캡처를 지원하지 않습니다."));
 		dialog.CloseButtonText(L"닫기");
 		co_await dialog.ShowAsync();
 	}
@@ -174,6 +181,7 @@ namespace winrt::ExtraVisionApp1::implementation
 			// 사이즈 재설정
 			newSize = true;
 			m_lastSize = frameContentSize;
+			m_swapChain->ResizeBuffers(2, static_cast<uint32_t>(m_lastSize.Width), static_cast<uint32_t>(m_lastSize.Height), static_cast<DXGI_FORMAT>(DirectXPixelFormat::B8G8R8A8UIntNormalized), 0);
 		}
 
 		// Direct3D11CaptureFrame을 ID3D11Texture2D로 변환
@@ -247,23 +255,121 @@ namespace winrt::ExtraVisionApp1::implementation
 		cv::Mat boundingImage = image.clone();
 		m_detector.drawBoundingBoxMask(boundingImage, detections);
 
-		// 디버그 코드
-		cv::imshow("원본", image);
-		cv::imshow("후처리", boundingImage);
-		cv::waitKey();
-
 		// ------------------------------------------------------------
-		// 3. 컴퓨터 제어 (구현 필요)
-
-		// ------------------------------------------------------------
-		// 4. UI 제어 (구현 필요)
-		// UI 스레드에서 Bitmap을 UI에 띄움
-		this->DispatcherQueue().TryEnqueue(
-			Microsoft::UI::Dispatching::DispatcherQueuePriority::Normal,
-			[this]()
+		// 3. 컴퓨터 제어
+		// 현재 사용하는 제어 로직
+		// -> 탐지된 객체 중 프로그램 중앙(조준점)과 가장 가까운 객체로 마우스 이동 및 사격
+		// 탐지된 객체와 프로그램 중앙까지의 거리 측정
+		int centerWidth = imageWidth / 2;
+		int centerHeight = imageHeight / 2;
+		float closestItemDistance = 1.0E10;
+		BoundingBox* closestItem = nullptr;
+		for (auto& item : detections)
+		{
+			// 원하는 객체가 아니면 스킵
+			//if (item.classId != 0) continue;
+			float distance = std::pow(centerWidth - item.box.x, 2) + std::pow(centerHeight - item.box.y, 2);
+			// 최소 거리인 객체를 추출
+			if (distance < closestItemDistance)
 			{
-				// 수행할 작업
-			});
+				closestItemDistance = distance;
+				closestItem = &(item.box);
+			}
+		}
+
+		// 마우스가 이동할 좌표 계산
+		if (closestItem)
+		{
+			int mouseMoveX = centerWidth - closestItem->x;
+			int mouseMoveY = centerHeight - closestItem->y;
+
+			// AI 토글 버튼이 ON일 때만 컴퓨터를 제어
+			if (this->m_isAIOn.load())
+			{
+				// SendInput 함수는 윈도우 전역으로 가상 이벤트를 발생시킴
+				// 따라서 현재 포커스된 윈도우에만 입력이 발생함
+				// 이때 무결성 수준이 낮거나 같은 프로그램에만 유효한 입력이 발생함
+				INPUT input = { 0 };
+				input.type = INPUT_MOUSE;
+				input.mi.dx = (-mouseMoveX * 65536) / GetSystemMetrics(SM_CXSCREEN);  // x 좌표 (스크린의 절대 좌표)
+				input.mi.dy = (-mouseMoveY * 65536) / GetSystemMetrics(SM_CYSCREEN);  // y 좌표 (스크린의 절대 좌표)
+				input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+				SendInput(1, &input, sizeof(INPUT));  // 마우스 이동
+
+				// 마우스 왼쪽 버튼 클릭 이벤트 (누름)
+				input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+				SendInput(1, &input, sizeof(INPUT));
+
+				// 마우스 왼쪽 버튼 클릭 이벤트 (떼기)
+				input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+				SendInput(1, &input, sizeof(INPUT));
+			}
+		}
+		
+		// ------------------------------------------------------------
+		// 4. UI 제어
+		// cv::Mat을 ID3D11Texture2D로 변환
+		IDestImage = nullptr;
+		desc = {};
+		desc.Width = boundingImage.cols;
+		desc.Height = boundingImage.rows;
+		desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+		desc.ArraySize = 1;
+		desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+		desc.MiscFlags = 0;
+		desc.SampleDesc.Count = 1;
+		desc.SampleDesc.Quality = 0;
+		desc.MipLevels = 1;
+		desc.CPUAccessFlags = 0;
+		desc.Usage = D3D11_USAGE_DEFAULT;
+
+		// ID3D11Texture2D 텍스처 생성
+		D3D11_SUBRESOURCE_DATA initData = {};
+		initData.pSysMem = boundingImage.data;
+		initData.SysMemPitch = boundingImage.cols * 4;
+		initData.SysMemSlicePitch = boundingImage.cols * boundingImage.rows * 4;
+		hr = m_d3dDevice->CreateTexture2D(&desc, &initData, IDestImage.put());
+		if (FAILED(hr)) return;
+		if (IDestImage == nullptr) return;
+
+		// SwapChain의 BackBuffer에 텍스처를 복사하고 화면에 출력
+		winrt::com_ptr<ID3D11Texture2D> backBuffer;
+		hr = m_swapChain->GetBuffer(0, winrt::guid_of<ID3D11Texture2D>(), backBuffer.put_void());
+		if (FAILED(hr)) return;
+
+		// 렌더 타겟 뷰 생성
+		winrt::com_ptr<ID3D11RenderTargetView> rtv;
+		D3D11_RENDER_TARGET_VIEW_DESC rtvDesc = {};
+		rtvDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+		rtvDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+		rtvDesc.Texture2D.MipSlice = 0;
+		hr = m_d3dDevice->CreateRenderTargetView(backBuffer.get(), &rtvDesc, rtv.put());
+		if (FAILED(hr)) return;
+
+		// 화면 클리어
+		float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f };
+		m_d3dContext->OMSetRenderTargets(1, rtv.put(), nullptr);		
+		m_d3dContext->ClearRenderTargetView(rtv.get(), clearColor);
+
+		// 출력할 화면 크기 조절
+		int left = 0;
+		int top = 0;
+		int right = std::min(m_imageFrameWidth, imageWidth);
+		int bottom = std::min(m_imageFrameHeight, imageHeight);
+
+		D3D11_BOX region = {};
+		region.left = static_cast<uint32_t>(left);
+		region.top = static_cast<uint32_t>(top);
+		region.right = static_cast<uint32_t>(right);
+		region.bottom = static_cast<uint32_t>(bottom);
+		region.back = 1;
+
+		// 화면 복사
+		m_d3dContext->CopySubresourceRegion(backBuffer.get(), 0, static_cast<uint32_t>(left), static_cast<uint32_t>(top), 0, IDestImage.get(), 0, &region);
+
+		// 화면 출력
+		DXGI_PRESENT_PARAMETERS parameters = { 0 };
+		m_swapChain->Present1(1, 0, &parameters);
 
 		// ------------------------------------------------------------
 		// 5. 로그 남기기 (구현 필요)

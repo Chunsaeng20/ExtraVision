@@ -9,8 +9,9 @@
 #pragma once
 
 #include "CheatPage.g.h"
-#include <d3d11.h>
-#include <dxgi1_2.h>
+#include <d3d11_4.h>
+#include <dxgi1_6.h>
+#include <d2d1_3.h>
 #include <winrt/Windows.Graphics.Capture.h>
 #include <opencv2/opencv.hpp>
 #include <YOLO11.hpp>
@@ -60,6 +61,10 @@ namespace winrt::ExtraVisionApp1::implementation
         winrt::com_ptr<ID3D11DeviceContext> m_d3dContext{ nullptr };
         winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice m_device{ nullptr };
 
+        // 이미지 프레임 크기
+		int m_imageFrameWidth = 0;
+		int m_imageFrameHeight = 0;
+
     private:
         // 메서드
         void Close();
@@ -76,7 +81,7 @@ namespace winrt::ExtraVisionApp1::factory_implementation
     };
 }
 
-// -------------------------------------------------- Direct3D 관련 메서드 시작 --------------------------------------------------
+// -------------------------------------------------- DirectX 관련 메서드 시작 --------------------------------------------------
 
 // DXGI 인터페이스를 가져오는 메서드
 template <typename T>
@@ -96,12 +101,45 @@ inline auto CreateDirect3DDevice(IDXGIDevice* dxgi_device)
     return d3d_device.as<winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice>();
 }
 
-// ID3D11Device를 생성하는 메서드
+// ID3D11Device를 생성하는 원본 메서드
 inline auto CreateD3DDevice(D3D_DRIVER_TYPE const type, winrt::com_ptr<ID3D11Device>& device)
 {
     WINRT_ASSERT(!device);
 
     return D3D11CreateDevice(nullptr, type, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0, D3D11_SDK_VERSION, device.put(), nullptr, nullptr);
+}
+
+// DXGISwapChain을 생성하는 원본 메서드
+inline auto CreateDXGISwapChain(winrt::com_ptr<ID3D11Device> const& device, const DXGI_SWAP_CHAIN_DESC1* desc)
+{
+    auto dxgiDevice = device.as<IDXGIDevice2>();
+    winrt::com_ptr<IDXGIAdapter> adapter;
+    winrt::check_hresult(dxgiDevice->GetParent(winrt::guid_of<IDXGIAdapter>(), adapter.put_void()));
+    winrt::com_ptr<IDXGIFactory2> factory;
+    winrt::check_hresult(adapter->GetParent(winrt::guid_of<IDXGIFactory2>(), factory.put_void()));
+
+    winrt::com_ptr<IDXGISwapChain1> swapchain;
+    winrt::check_hresult(factory->CreateSwapChainForComposition(device.get(), desc, nullptr, swapchain.put()));
+
+    return swapchain;
+}
+
+// DXGISwapChain을 생성하는 메서드
+inline auto CreateDXGISwapChain(winrt::com_ptr<ID3D11Device> const& device, uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t bufferCount)
+{
+    DXGI_SWAP_CHAIN_DESC1 desc = {};
+    desc.Width = width;
+    desc.Height = height;
+    desc.Format = format;
+    desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    desc.SampleDesc.Count = 1;
+    desc.SampleDesc.Quality = 0;
+    desc.BufferCount = bufferCount;
+    desc.Scaling = DXGI_SCALING_STRETCH;
+    desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+    desc.AlphaMode = DXGI_ALPHA_MODE_PREMULTIPLIED;
+
+    return CreateDXGISwapChain(device, &desc);
 }
 
 // ID3D11Device를 생성하는 메서드
@@ -119,4 +157,4 @@ inline auto CreateD3DDevice()
     return device;
 }
 
-// -------------------------------------------------- Direct3D 관련 메서드 종료 --------------------------------------------------
+// -------------------------------------------------- DirectX 관련 메서드 종료 --------------------------------------------------
