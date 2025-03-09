@@ -66,23 +66,6 @@ namespace winrt::ExtraVisionApp1::implementation
 		}
 	}
 
-	void winrt::ExtraVisionApp1::implementation::CheatPage::LogSwitch_Toggled(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&)
-	{
-		// Log 토글 버튼 이벤트 핸들러
-		auto toggleSwitch = sender.as<ToggleSwitch>();
-		if (toggleSwitch != NULL)
-		{
-			if (toggleSwitch.IsOn())
-			{
-				// Log 녹화 시작
-			}
-			else
-			{
-				// Log 녹화 종료
-			}
-		}
-	}
-
 	void winrt::ExtraVisionApp1::implementation::CheatPage::SearchProgramBtn_Click(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&)
 	{
 		// 프로그램 검색 버튼 이벤트 핸들러
@@ -126,6 +109,7 @@ namespace winrt::ExtraVisionApp1::implementation
 			HRESULT hr = panelNative->SetSwapChain(m_swapChain.get());
 			m_imageFrameWidth = static_cast<int>(ImageFrame().ActualWidth());
 			m_imageFrameHeight = static_cast<int>(ImageFrame().ActualHeight());
+			m_imageFrameRatio = (float)m_imageFrameWidth / m_imageFrameHeight;
 
 			// 동기화
 			m_isItemLoaded.store(true);
@@ -169,7 +153,7 @@ namespace winrt::ExtraVisionApp1::implementation
 	{
 		// 캡처된 프레임이 프레임 풀에 저장될 때 발생하는 이벤트 핸들러
 		// 주요 로직을 실행하는 백그라운드 스레드
-		// ------------------------------------------------------------
+		// ---------------------------------------------------------------------------------------------------------------
 		// 1. 프레임 가져오기
 		auto frame = sender.TryGetNextFrame();
 		auto frameContentSize = frame.ContentSize();
@@ -241,7 +225,7 @@ namespace winrt::ExtraVisionApp1::implementation
 			m_framePool.Recreate(m_device, DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, m_lastSize);
 		}
 
-		// ------------------------------------------------------------
+		// ---------------------------------------------------------------------------------------------------------------
 		// 2. AI 모델에 넣기
 		// OpenCV Mat 타입으로 변환
 		// - ID3D11Texture2D은 BGRA 4채널
@@ -255,7 +239,7 @@ namespace winrt::ExtraVisionApp1::implementation
 		cv::Mat boundingImage = image.clone();
 		m_detector.drawBoundingBoxMask(boundingImage, detections);
 
-		// ------------------------------------------------------------
+		// ---------------------------------------------------------------------------------------------------------------
 		// 3. 컴퓨터 제어
 		// 현재 사용하는 제어 로직
 		// -> 탐지된 객체 중 프로그램 중앙(조준점)과 가장 가까운 객체로 마우스 이동 및 사격
@@ -306,13 +290,20 @@ namespace winrt::ExtraVisionApp1::implementation
 			}
 		}
 		
-		// ------------------------------------------------------------
+		// ---------------------------------------------------------------------------------------------------------------
 		// 4. UI 제어
+		// cv::Mat 크기 조절
+		cv::Mat imageUI;
+		float imageRatio = (float)imageWidth / imageHeight;
+		imageHeight = m_imageFrameHeight;
+		imageWidth = m_imageFrameHeight * imageRatio;
+		cv::resize(boundingImage, imageUI, cv::Size(imageWidth, imageHeight), 0, 0, cv::INTER_LINEAR);
+
 		// cv::Mat을 ID3D11Texture2D로 변환
 		IDestImage = nullptr;
 		desc = {};
-		desc.Width = boundingImage.cols;
-		desc.Height = boundingImage.rows;
+		desc.Width = imageUI.cols;
+		desc.Height = imageUI.rows;
 		desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
 		desc.ArraySize = 1;
 		desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
@@ -325,9 +316,9 @@ namespace winrt::ExtraVisionApp1::implementation
 
 		// ID3D11Texture2D 텍스처 생성
 		D3D11_SUBRESOURCE_DATA initData = {};
-		initData.pSysMem = boundingImage.data;
-		initData.SysMemPitch = boundingImage.cols * 4;
-		initData.SysMemSlicePitch = boundingImage.cols * boundingImage.rows * 4;
+		initData.pSysMem = imageUI.data;
+		initData.SysMemPitch = imageUI.cols * 4;
+		initData.SysMemSlicePitch = imageUI.cols * imageUI.rows * 4;
 		hr = m_d3dDevice->CreateTexture2D(&desc, &initData, IDestImage.put());
 		if (FAILED(hr)) return;
 		if (IDestImage == nullptr) return;
@@ -352,16 +343,16 @@ namespace winrt::ExtraVisionApp1::implementation
 		m_d3dContext->ClearRenderTargetView(rtv.get(), clearColor);
 
 		// 출력할 화면 크기 조절
-		int left = 0;
+		int left = (m_imageFrameWidth - imageWidth) / 2;
 		int top = 0;
-		int right = std::min(m_imageFrameWidth, imageWidth);
-		int bottom = std::min(m_imageFrameHeight, imageHeight);
+		int right = imageWidth + left;
+		int bottom = imageHeight;
 
 		D3D11_BOX region = {};
-		region.left = static_cast<uint32_t>(left);
-		region.top = static_cast<uint32_t>(top);
-		region.right = static_cast<uint32_t>(right);
-		region.bottom = static_cast<uint32_t>(bottom);
+		region.left = static_cast<uint32_t>(0);
+		region.top = static_cast<uint32_t>(0);
+		region.right = static_cast<uint32_t>(imageWidth);
+		region.bottom = static_cast<uint32_t>(imageHeight);
 		region.back = 1;
 
 		// 화면 복사
@@ -370,11 +361,5 @@ namespace winrt::ExtraVisionApp1::implementation
 		// 화면 출력
 		DXGI_PRESENT_PARAMETERS parameters = { 0 };
 		m_swapChain->Present1(1, 0, &parameters);
-
-		// ------------------------------------------------------------
-		// 5. 로그 남기기 (구현 필요)
-		// 영상으로 남기기
-		// cv::VideoWriter 사용
-		// 고정된 화면 크기 필요
 	}
 }

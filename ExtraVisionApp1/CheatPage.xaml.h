@@ -25,6 +25,7 @@ namespace winrt::ExtraVisionApp1::implementation
     struct CheatPage : CheatPageT<CheatPage>
     {
     public:
+        // UI 로직 메서드
         CheatPage()
         {
             // Xaml objects should not call InitializeComponent during construction.
@@ -36,10 +37,10 @@ namespace winrt::ExtraVisionApp1::implementation
         }
         void InitializeComponent();
         void CheatSwitch_Toggled(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
-        void LogSwitch_Toggled(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
         void SearchProgramBtn_Click(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const& e);
 
     private:
+        // 비즈니스 로직 변수
         // YOLO 모델
         YOLO11Detector m_detector{ MODELPATH, LABELSPATH, ISGPU };
 
@@ -64,9 +65,10 @@ namespace winrt::ExtraVisionApp1::implementation
         // 이미지 프레임 크기
 		int m_imageFrameWidth = 0;
 		int m_imageFrameHeight = 0;
+		float m_imageFrameRatio = 0.0f;
 
     private:
-        // 메서드
+        // 비즈니스 로직 메서드
         void Close();
         winrt::fire_and_forget OpenWindowList();
         winrt::fire_and_forget ShowErrorMsg();
