@@ -107,6 +107,8 @@ namespace winrt::ExtraVisionApp1::implementation
 
 			auto panelNative{ ImageFrame().as<ISwapChainPanelNative>() };
 			HRESULT hr = panelNative->SetSwapChain(m_swapChain.get());
+			if (FAILED(hr)) co_return;
+
 			m_imageFrameWidth = static_cast<int>(ImageFrame().ActualWidth());
 			m_imageFrameHeight = static_cast<int>(ImageFrame().ActualHeight());
 			m_imageFrameRatio = (float)m_imageFrameWidth / m_imageFrameHeight;
@@ -137,6 +139,11 @@ namespace winrt::ExtraVisionApp1::implementation
 		if (m_isItemLoaded.compare_exchange_strong(expected, false))
 		{
 			m_frameArrived.revoke();
+
+			// 화면 캡처가 중지될 때까지 대기
+			std::unique_lock<std::mutex> lock(mtx);
+			cv.wait(lock, [this] { return m_isLock == 0; });
+
 			m_framePool.Close();
 			m_session.Close();
 
@@ -151,6 +158,9 @@ namespace winrt::ExtraVisionApp1::implementation
 
 	void CheatPage::OnFrameArrived(winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool const& sender, winrt::Windows::Foundation::IInspectable const&)
 	{
+		// 스레드 락
+		m_isLock++;
+
 		// 캡처된 프레임이 프레임 풀에 저장될 때 발생하는 이벤트 핸들러
 		// 주요 로직을 실행하는 백그라운드 스레드
 		// ---------------------------------------------------------------------------------------------------------------
@@ -252,7 +262,7 @@ namespace winrt::ExtraVisionApp1::implementation
 		{
 			// 원하는 객체가 아니면 스킵
 			//if (item.classId != 0) continue;
-			float distance = std::pow(centerWidth - item.box.x, 2) + std::pow(centerHeight - item.box.y, 2);
+			double distance = std::pow(centerWidth - item.box.x, 2) + std::pow(centerHeight - item.box.y, 2);
 			// 최소 거리인 객체를 추출
 			if (distance < closestItemDistance)
 			{
@@ -345,9 +355,8 @@ namespace winrt::ExtraVisionApp1::implementation
 		// 출력할 화면 크기 조절
 		int left = (m_imageFrameWidth - imageWidth) / 2;
 		int top = 0;
-		int right = imageWidth + left;
-		int bottom = imageHeight;
 
+		// 복사할 화면 영역 조절
 		D3D11_BOX region = {};
 		region.left = static_cast<uint32_t>(0);
 		region.top = static_cast<uint32_t>(0);
@@ -361,5 +370,9 @@ namespace winrt::ExtraVisionApp1::implementation
 		// 화면 출력
 		DXGI_PRESENT_PARAMETERS parameters = { 0 };
 		m_swapChain->Present1(1, 0, &parameters);
+
+		// 스레드 락 해제
+		m_isLock--;
+		cv.notify_all();
 	}
 }

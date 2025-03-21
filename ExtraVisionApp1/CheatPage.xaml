@@ -72,7 +72,7 @@
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
                     
-                    <TextBlock Grid.Column="0" HorizontalTextAlignment="Center" Text="Cheat ON/OFF"/>
+                    <TextBlock Grid.Column="0" HorizontalTextAlignment="Center" Text="치트 끄기/켜기"/>
                     <ToggleSwitch x:Name="CheatSwitch" Grid.Column="1" HorizontalAlignment="Stretch" OffContent="끄기" OnContent="켜기" Toggled="CheatSwitch_Toggled"/>
                 </Grid>
             </Grid>
