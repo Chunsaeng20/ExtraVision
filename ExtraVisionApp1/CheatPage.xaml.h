@@ -33,7 +33,8 @@ inline std::string GetModelDirectory(const std::string& filePath, const std::str
 inline bool isGpuAvailable()
 {
 	// CUDA 지원 여부
-	auto cudaAvailable = std::find(Ort::GetAvailableProviders().begin(), Ort::GetAvailableProviders().end(), "CUDAExecutionProvider");
+    std::vector<std::string> availableProviders = Ort::GetAvailableProviders();
+    auto cudaAvailable = std::find(availableProviders.begin(), availableProviders.end(), "CUDAExecutionProvider");
 
     if (cudaAvailable != Ort::GetAvailableProviders().end()) return true;
 	else return false;
