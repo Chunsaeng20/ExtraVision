@@ -16,10 +16,10 @@
 #include <opencv2/opencv.hpp>
 #include <YOLO11.hpp>
 #include <filesystem>
+#include <onnxruntime_cxx_api.h>
 
 #define MODELPATH "models\\yolo11n.onnx"    // YOLO 모델 상대 경로
 #define LABELSPATH "models\\coco.names"     // 라벨 상대 경로
-#define ISGPU false                         // GPU 사용 여부
 
 // 모델의 절대 경로를 가져오는 함수
 inline std::string GetModelDirectory(const std::string& filePath, const std::string& modelPath)
@@ -27,6 +27,16 @@ inline std::string GetModelDirectory(const std::string& filePath, const std::str
     std::filesystem::path path(filePath);
 	path = path.parent_path();
 	return path.string() + "\\" + modelPath;
+}
+
+// GPU 사용 가능 여부를 확인하는 함수
+inline bool isGpuAvailable()
+{
+	// CUDA 지원 여부
+	auto cudaAvailable = std::find(Ort::GetAvailableProviders().begin(), Ort::GetAvailableProviders().end(), "CUDAExecutionProvider");
+
+    if (cudaAvailable != Ort::GetAvailableProviders().end()) return true;
+	else return false;
 }
 
 namespace winrt::ExtraVisionApp1::implementation
@@ -51,7 +61,7 @@ namespace winrt::ExtraVisionApp1::implementation
     private:
         // 비즈니스 로직 변수
         // YOLO 모델
-        YOLO11Detector m_detector{ GetModelDirectory(__FILE__, MODELPATH), GetModelDirectory(__FILE__, LABELSPATH), ISGPU};
+        YOLO11Detector m_detector{ GetModelDirectory(__FILE__, MODELPATH), GetModelDirectory(__FILE__, LABELSPATH), isGpuAvailable()};
 
         // 컨트롤 변수
         std::atomic<bool> m_isAIOn = false;
