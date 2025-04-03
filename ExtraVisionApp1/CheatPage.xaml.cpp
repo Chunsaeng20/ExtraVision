@@ -55,12 +55,34 @@ namespace winrt::ExtraVisionApp1::implementation
 		{
 			if (toggleSwitch.IsOn())
 			{
-				// AI 작동
-				this->m_isAIOn.store(true);
+				// 잠시 후 AI 작동
+				std::thread TurnOnAI([this]() {
+					// 3초 동안 잠들기
+					std::this_thread::sleep_for(std::chrono::milliseconds(3000));
+
+					m_isAIOn.store(true);
+					});
+				TurnOnAI.detach();
+
+				auto dispatcherQueue = this->DispatcherQueue();
+
+				// 잠시 후 AI 정지
+				std::thread TurnOffAI([this, dispatcherQueue]() {
+					// 15초 동안 잠들기
+					std::this_thread::sleep_for(std::chrono::milliseconds(15000));
+
+					m_isAIOn.store(false);
+
+					dispatcherQueue.TryEnqueue([this]()
+						{
+							CheatSwitch().IsOn(false);
+						});
+					});
+				TurnOffAI.detach();
 			}
 			else
 			{
-				// AI 정지
+				// AI 즉시 정지
 				this->m_isAIOn.store(false);
 			}
 		}
@@ -161,10 +183,14 @@ namespace winrt::ExtraVisionApp1::implementation
 		// 스레드 락
 		m_isLock++;
 
+		// Frame Per Second 측정
+		auto start_time = std::chrono::high_resolution_clock::now();
+
 		// 캡처된 프레임이 프레임 풀에 저장될 때 발생하는 이벤트 핸들러
 		// 주요 로직을 실행하는 백그라운드 스레드
 		// ---------------------------------------------------------------------------------------------------------------
 		// 1. 프레임 가져오기
+		//
 		auto frame = sender.TryGetNextFrame();
 		auto frameContentSize = frame.ContentSize();
 
@@ -237,6 +263,7 @@ namespace winrt::ExtraVisionApp1::implementation
 
 		// ---------------------------------------------------------------------------------------------------------------
 		// 2. AI 모델에 넣기
+		// 
 		// OpenCV Mat 타입으로 변환
 		// - ID3D11Texture2D은 BGRA 4채널
 		// - Row Major를 Column Major로 변환
@@ -251,58 +278,74 @@ namespace winrt::ExtraVisionApp1::implementation
 
 		// ---------------------------------------------------------------------------------------------------------------
 		// 3. 컴퓨터 제어
+		// # 화면 객체의 위치 추적이 정밀하지 않음 <- 고칠 예정
+		// 
 		// 현재 사용하는 제어 로직
 		// -> 탐지된 객체 중 프로그램 중앙(조준점)과 가장 가까운 객체로 마우스 이동 및 사격
+		// 
 		// 탐지된 객체와 프로그램 중앙까지의 거리 측정
 		int centerWidth = imageWidth / 2;
 		int centerHeight = imageHeight / 2;
-		float closestItemDistance = 1.0E10;
-		BoundingBox* closestItem = nullptr;
+		double closestItemDistance = 1.0E10;
+
+		// 마우스가 이동할 상대 좌표
+		int mouseMoveX = 0;
+		int mouseMoveY = 0;
 		for (auto& item : detections)
 		{
 			// 원하는 객체가 아니면 스킵
 			//if (item.classId != 0) continue;
-			double distance = std::pow(centerWidth - item.box.x, 2) + std::pow(centerHeight - item.box.y, 2);
+
+			// 맨해튼 거리 계산
+			int centerX = item.box.x + item.box.width / 2;
+			int centerY = item.box.y + item.box.height / 2;
+			int dx = centerWidth - centerX;
+			int dy = centerHeight - centerY;
+
+			double manhattanDistance = std::abs(dx) + std::abs(dy);
+
 			// 최소 거리인 객체를 추출
-			if (distance < closestItemDistance)
+			if (manhattanDistance < closestItemDistance)
 			{
-				closestItemDistance = distance;
-				closestItem = &(item.box);
+				closestItemDistance = manhattanDistance;
+				mouseMoveX = dx / 2;
+				mouseMoveY = dy / 2;
 			}
 		}
 
-		// 마우스가 이동할 좌표 계산
-		if (closestItem)
+		// SendInput 함수는 윈도우 전역으로 가상 이벤트를 발생시킴
+		// 따라서 현재 포커스된 윈도우에만 입력이 발생함
+		// 이때 무결성 수준이 낮거나 같은 프로그램에만 유효한 입력이 발생함
+		INPUT input = { 0 };
+		input.type = INPUT_MOUSE;
+		input.mi.dx = -mouseMoveX;
+		input.mi.dy = -mouseMoveY;
+
+		// 마우스 왼쪽 버튼 클릭 이벤트 (뗌)
+		input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+		SendInput(1, &input, sizeof(INPUT));
+
+		// 화면 중앙과 객체의 위치가 충분히 가까우면
+		if (this->m_isAIOn.load() && abs(mouseMoveX) + abs(mouseMoveY) < 50 && abs(mouseMoveX) + abs(mouseMoveY) != 0)
 		{
-			int mouseMoveX = centerWidth - closestItem->x;
-			int mouseMoveY = centerHeight - closestItem->y;
+			// 마우스 왼쪽 버튼 클릭 이벤트 (누름)
+			input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+			SendInput(1, &input, sizeof(INPUT));
+		}
 
-			// AI 토글 버튼이 ON일 때만 컴퓨터를 제어
-			if (this->m_isAIOn.load())
-			{
-				// SendInput 함수는 윈도우 전역으로 가상 이벤트를 발생시킴
-				// 따라서 현재 포커스된 윈도우에만 입력이 발생함
-				// 이때 무결성 수준이 낮거나 같은 프로그램에만 유효한 입력이 발생함
-				INPUT input = { 0 };
-				input.type = INPUT_MOUSE;
-				input.mi.dx = (-mouseMoveX * 65536) / GetSystemMetrics(SM_CXSCREEN);  // x 좌표 (스크린의 절대 좌표)
-				input.mi.dy = (-mouseMoveY * 65536) / GetSystemMetrics(SM_CYSCREEN);  // y 좌표 (스크린의 절대 좌표)
-				input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
-				SendInput(1, &input, sizeof(INPUT));  // 마우스 이동
-
-				// 마우스 왼쪽 버튼 클릭 이벤트 (누름)
-				input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-				SendInput(1, &input, sizeof(INPUT));
-
-				// 마우스 왼쪽 버튼 클릭 이벤트 (떼기)
-				input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
-				SendInput(1, &input, sizeof(INPUT));
-			}
+		// AI가 켜져있으면
+		if (this->m_isAIOn.load())
+		{
+			// 마우스 이동
+			input.mi.dwFlags = MOUSEEVENTF_MOVE;
+			SendInput(1, &input, sizeof(INPUT));
 		}
 		
 		// ---------------------------------------------------------------------------------------------------------------
 		// 4. UI 제어
-		// cv::Mat 크기 조절
+		// # 화면 크기를 조절할 경우 이전 프레임의 잔상이 테두리에 남는 버그가 있으나 치명적이지 않아 놔둠
+		// 
+		// cv::Mat 크기를 프레임 높이에 맞게 조절
 		cv::Mat imageUI;
 		float imageRatio = (float)imageWidth / imageHeight;
 		imageHeight = m_imageFrameHeight;
@@ -348,15 +391,14 @@ namespace winrt::ExtraVisionApp1::implementation
 		if (FAILED(hr)) return;
 
 		// 화면 클리어
-		float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f };
+		float clearColor[] = { 1.0f, 1.0f, 1.0f, 1.0f };
 		m_d3dContext->OMSetRenderTargets(1, rtv.put(), nullptr);		
 		m_d3dContext->ClearRenderTargetView(rtv.get(), clearColor);
 
-		// 출력할 화면 크기 조절
+		// 복사할 화면 대비 출력할 화면의 여백 측정
 		int left = (m_imageFrameWidth - imageWidth) / 2;
-		int top = 0;
 
-		// 복사할 화면 영역 조절
+		// 복사할 화면 영역 크기 측정
 		D3D11_BOX region = {};
 		region.left = static_cast<uint32_t>(0);
 		region.top = static_cast<uint32_t>(0);
@@ -365,11 +407,19 @@ namespace winrt::ExtraVisionApp1::implementation
 		region.back = 1;
 
 		// 화면 복사
-		m_d3dContext->CopySubresourceRegion(backBuffer.get(), 0, static_cast<uint32_t>(left), static_cast<uint32_t>(top), 0, IDestImage.get(), 0, &region);
+		m_d3dContext->CopySubresourceRegion(backBuffer.get(), 0, static_cast<uint32_t>(left), 0, 0, IDestImage.get(), 0, &region);
 
 		// 화면 출력
 		DXGI_PRESENT_PARAMETERS parameters = { 0 };
 		m_swapChain->Present1(1, 0, &parameters);
+
+		// ---------------------------------------------------------------------------------------------------------------
+
+		// Frame Per Second 측정
+		auto end_time = std::chrono::high_resolution_clock::now();
+		auto frame_duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
+		double fps = 1000000.0 / frame_duration;
+		OutputDebugStringW((to_hstring(fps) + L"\n").c_str());
 
 		// 스레드 락 해제
 		m_isLock--;

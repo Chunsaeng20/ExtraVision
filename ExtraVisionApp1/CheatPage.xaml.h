@@ -62,7 +62,9 @@ namespace winrt::ExtraVisionApp1::implementation
     private:
         // 비즈니스 로직 변수
         // YOLO 모델
-        YOLO11Detector m_detector{ GetModelDirectory(__FILE__, MODELPATH), GetModelDirectory(__FILE__, LABELSPATH), isGpuAvailable()};
+        // # onnx runtime 관련 gpu inference 오류가 발생 <- 해결 필요
+        //YOLO11Detector m_detector{ GetModelDirectory(__FILE__, MODELPATH), GetModelDirectory(__FILE__, LABELSPATH), isGpuAvailable() };
+        YOLO11Detector m_detector{ GetModelDirectory(__FILE__, MODELPATH), GetModelDirectory(__FILE__, LABELSPATH), false };
 
         // 컨트롤 변수
         std::atomic<bool> m_isAIOn = false;
@@ -94,7 +96,7 @@ namespace winrt::ExtraVisionApp1::implementation
         // 비즈니스 로직 메서드
         void Close();
         winrt::fire_and_forget OpenWindowList();
-        winrt::fire_and_forget ShowErrorMsg();
+        winrt::fire_and_forget ShowErrorMsg();        
         void OnFrameArrived(winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool const& sender, winrt::Windows::Foundation::IInspectable const& args);
     };
 }
