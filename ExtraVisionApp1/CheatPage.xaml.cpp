@@ -278,8 +278,6 @@ namespace winrt::ExtraVisionApp1::implementation
 
 		// ---------------------------------------------------------------------------------------------------------------
 		// 3. 컴퓨터 제어
-		// # 화면 객체의 위치 추적이 정밀하지 않음 <- 고칠 예정
-		// 
 		// 현재 사용하는 제어 로직
 		// -> 탐지된 객체 중 프로그램 중앙(조준점)과 가장 가까운 객체로 마우스 이동 및 사격
 		// 
@@ -308,10 +306,36 @@ namespace winrt::ExtraVisionApp1::implementation
 			if (manhattanDistance < closestItemDistance)
 			{
 				closestItemDistance = manhattanDistance;
-				mouseMoveX = dx / 2;
-				mouseMoveY = dy / 2;
+				mouseMoveX = dx / 2 - item.box.width / 6;
+				mouseMoveY = dy / 2 + item.box.height / 6;
 			}
 		}
+
+		// 마우스가 이동할 상대 좌표 보정
+		// 2차원 픽셀 변화량은 3차원 좌표계에서의 변화량과 다르므로
+		// 오차가 발생함. 따라서 보정이 필요함
+		float imageRatio = (float)imageWidth / imageHeight;
+		float horizontalFOV = 60.0f;
+		float verticalFOV = 2 * atan(tan(horizontalFOV / 2.0f) * imageRatio);
+
+		// 객체의 상대 좌표 정규화 [-0.5, 0.5]
+		float normalizedX = (float)mouseMoveX / imageWidth;
+		float normalizedY = (float)mouseMoveY / imageHeight;
+
+		// 정규화된 좌표를 각도 변화량으로 변환
+		float angleX = normalizedX * horizontalFOV / 2;
+		float angleY = normalizedY * verticalFOV / 2;
+
+		// 각도 변화량을 픽셀 변화량으로 변환 및 마우스 민감도 적용
+		float mouseSensitivity = 1.0f;
+		mouseMoveX = static_cast<int>((angleX * imageWidth / horizontalFOV) * mouseSensitivity);
+		mouseMoveY = static_cast<int>((angleY * imageHeight / verticalFOV) * mouseSensitivity);
+
+		// 프레임 기반 보정
+		// 목표에 도달하는 프레임 수를 설정
+		static int targetFrames = 1;
+		mouseMoveX = static_cast<int>(mouseMoveX / targetFrames);
+		mouseMoveY = static_cast<int>(mouseMoveY / targetFrames);
 
 		// SendInput 함수는 윈도우 전역으로 가상 이벤트를 발생시킴
 		// 따라서 현재 포커스된 윈도우에만 입력이 발생함
@@ -321,33 +345,71 @@ namespace winrt::ExtraVisionApp1::implementation
 		input.mi.dx = -mouseMoveX;
 		input.mi.dy = -mouseMoveY;
 
-		// 마우스 왼쪽 버튼 클릭 이벤트 (뗌)
-		input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
-		SendInput(1, &input, sizeof(INPUT));
-
-		// 화면 중앙과 객체의 위치가 충분히 가까우면
-		if (this->m_isAIOn.load() && abs(mouseMoveX) + abs(mouseMoveY) < 50 && abs(mouseMoveX) + abs(mouseMoveY) != 0)
-		{
-			// 마우스 왼쪽 버튼 클릭 이벤트 (누름)
-			input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-			SendInput(1, &input, sizeof(INPUT));
-		}
-
 		// AI가 켜져있으면
-		if (this->m_isAIOn.load())
+		if (m_isAIOn.load())
 		{
-			// 마우스 이동
-			input.mi.dwFlags = MOUSEEVENTF_MOVE;
-			SendInput(1, &input, sizeof(INPUT));
+			// AI 제어 방식 (1: 완전 제어, 2: 부분 제어)
+			int method = 1;
+			switch (method)
+			{
+			case 1:
+				// AI가 컴퓨터를 완전히 제어
+				// 화면 중앙과 객체의 위치가 충분히 가까우면
+				if (abs(mouseMoveX) + abs(mouseMoveY) < 10 && closestItemDistance != 1.0E10)
+				{
+					// 마우스 왼쪽 버튼 클릭 이벤트 (누름)
+					input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+					SendInput(1, &input, sizeof(INPUT));
+
+					// 마우스 누름 이벤트의 확실한 작동을 위한 딜레이
+					for(int i = 0; i < 10; i++)
+						SendInput(1, &input, sizeof(INPUT));
+				}
+
+				// 마우스 이동
+				input.mi.dwFlags = MOUSEEVENTF_MOVE;
+				SendInput(1, &input, sizeof(INPUT));
+
+				// 화면 중앙과 객체의 위치가 충분히 멀면
+				if (abs(mouseMoveX) + abs(mouseMoveY) > 10)
+				{
+					// 마우스 왼쪽 버튼 클릭 이벤트 (뗌)
+					input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+					SendInput(1, &input, sizeof(INPUT));
+				}
+				break;
+
+			case 2:
+				// AI가 컴퓨터를 부분적으로 제어
+				// 화면 중앙과 객체의 위치가 충분히 가까우면
+				if (abs(mouseMoveX) + abs(mouseMoveY) < 10 && closestItemDistance != 1.0E10)
+				{
+					// 마우스 왼쪽 버튼 클릭 이벤트 (누름)
+					input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+					SendInput(1, &input, sizeof(INPUT));
+
+					// 마우스 누름 이벤트의 확실한 작동을 위한 딜레이
+					for (int i = 0; i < 10; i++)
+						SendInput(1, &input, sizeof(INPUT));
+				}
+
+				// 화면 중앙과 객체의 위치가 충분히 멀면
+				if (abs(mouseMoveX) + abs(mouseMoveY) > 10)
+				{
+					// 마우스 왼쪽 버튼 클릭 이벤트 (뗌)
+					input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+					SendInput(1, &input, sizeof(INPUT));
+				}
+				break;
+			}
 		}
-		
+
 		// ---------------------------------------------------------------------------------------------------------------
 		// 4. UI 제어
 		// # 화면 크기를 조절할 경우 이전 프레임의 잔상이 테두리에 남는 버그가 있으나 치명적이지 않아 놔둠
 		// 
 		// cv::Mat 크기를 프레임 높이에 맞게 조절
 		cv::Mat imageUI;
-		float imageRatio = (float)imageWidth / imageHeight;
 		imageHeight = m_imageFrameHeight;
 		imageWidth = m_imageFrameHeight * imageRatio;
 		cv::resize(boundingImage, imageUI, cv::Size(imageWidth, imageHeight), 0, 0, cv::INTER_LINEAR);
