@@ -30,8 +30,11 @@ inline std::string GetModelDirectory(const std::string& filePath, const std::str
 }
 
 // GPU 사용 가능 여부를 확인하는 함수
-inline bool isGpuAvailable()
+inline bool isGpuAvailable(bool useGpu = true)
 {
+    // GPU 사용을 원하지 않는 경우 false 반환
+	if (!useGpu) return false;
+
 	// CUDA 지원 여부
     std::vector<std::string> availableProviders = Ort::GetAvailableProviders();
     auto cudaAvailable = std::find(availableProviders.begin(), availableProviders.end(), "CUDAExecutionProvider");
@@ -63,40 +66,46 @@ namespace winrt::ExtraVisionApp1::implementation
         // 비즈니스 로직 변수
         // YOLO 모델
         // # onnx runtime 관련 gpu inference 오류가 발생 <- 해결 필요
-        //YOLO11Detector m_detector{ GetModelDirectory(__FILE__, MODELPATH), GetModelDirectory(__FILE__, LABELSPATH), isGpuAvailable() };
-        YOLO11Detector m_detector{ GetModelDirectory(__FILE__, MODELPATH), GetModelDirectory(__FILE__, LABELSPATH), false };
+        YOLO11Detector m_detector{ GetModelDirectory(__FILE__, MODELPATH), GetModelDirectory(__FILE__, LABELSPATH), isGpuAvailable(false) };
 
         // 컨트롤 변수
-        std::atomic<bool> m_isAIOn = false;
-        std::atomic<bool> m_isItemLoaded = false;
-        std::atomic<int> m_isLock = 0;
-        std::condition_variable cv;
-        std::mutex mtx;
+		std::atomic<bool> m_isAIOn = false;         // AI 활성화 여부
+		std::atomic<bool> m_isItemLoaded = false;   // 캡처 아이템이 로드되었는지 여부
+		std::atomic<int> m_isLock = 0;              // 스레드 동기화를 위한 변수
+		std::condition_variable cv;                 // 스레드 동기화를 위한 조건 변수
+		std::mutex mtx;                             // 스레드 동기화를 위한 뮤텍스
 
         // Windows Graphics Capture API
-        winrt::Windows::Graphics::Capture::GraphicsCaptureItem m_item{ nullptr };
-        winrt::Windows::Graphics::Capture::GraphicsCaptureSession m_session{ nullptr };
-        winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool m_framePool{ nullptr };
-        winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool::FrameArrived_revoker m_frameArrived;
-        winrt::Windows::Graphics::SizeInt32 m_lastSize{ 0 };
+		winrt::Windows::Graphics::Capture::GraphicsCaptureItem m_item{ nullptr };                           // 캡처 아이템
+		winrt::Windows::Graphics::Capture::GraphicsCaptureSession m_session{ nullptr };                     // 캡처 세션
+		winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool m_framePool{ nullptr };               // 프레임 풀
+		winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool::FrameArrived_revoker m_frameArrived; // 프레임 도착 이벤트 핸들러
+		winrt::Windows::Graphics::SizeInt32 m_lastSize{ 0 };                                                // 마지막 캡처 크기
 
         // Direct3D API
-        winrt::com_ptr<IDXGIDevice> m_dxgiDevice{ nullptr };
-        winrt::com_ptr<ID3D11Device> m_d3dDevice{ nullptr };
-        winrt::com_ptr<IDXGISwapChain1> m_swapChain{ nullptr };
-        winrt::com_ptr<ID3D11DeviceContext> m_d3dContext{ nullptr };
-        winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice m_device{ nullptr };
+		winrt::com_ptr<IDXGIDevice> m_dxgiDevice{ nullptr };                                                // DXGI 디바이스
+		winrt::com_ptr<ID3D11Device> m_d3dDevice{ nullptr };                                                // D3D11 디바이스
+		winrt::com_ptr<IDXGISwapChain1> m_swapChain{ nullptr };                                             // DXGI 스왑 체인
+		winrt::com_ptr<ID3D11DeviceContext> m_d3dContext{ nullptr };                                        // D3D11 디바이스 컨텍스트
+		winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice m_device{ nullptr };                 // D3D11 디바이스 래퍼
 
         // 이미지 프레임 크기
-		int m_imageFrameWidth = 0;
-		int m_imageFrameHeight = 0;
-		float m_imageFrameRatio = 0.0f;
+		int m_imageFrameWidth = 0;                  // 이미지 프레임 너비
+		int m_imageFrameHeight = 0;                 // 이미지 프레임 높이
+		float m_imageFrameRatio = 0.0f;             // 이미지 프레임 비율
 
     private:
         // 비즈니스 로직 메서드
+		// Windows Graphics Capture API 정리
         void Close();
+
+        // 윈도우 목록 열기
         winrt::fire_and_forget OpenWindowList();
+
+		// 윈도우가 GraphicsCapture를 지원하지 않을 때의 에러 메시지
         winrt::fire_and_forget ShowErrorMsg();        
+
+		// 프레임 도착 이벤트 핸들러
         void OnFrameArrived(winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool const& sender, winrt::Windows::Foundation::IInspectable const& args);
     };
 }

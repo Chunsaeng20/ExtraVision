@@ -47,9 +47,9 @@ namespace winrt::ExtraVisionApp1::implementation
 		m_device = CreateDirect3DDevice(m_dxgiDevice.get());
 	}
 
+	// AI 토글 버튼 이벤트 핸들러
 	void winrt::ExtraVisionApp1::implementation::CheatPage::CheatSwitch_Toggled(winrt::Windows::Foundation::IInspectable const& sender, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&)
 	{
-		// AI 토글 버튼 이벤트 핸들러
 		auto toggleSwitch = sender.as<ToggleSwitch>();
 		if (toggleSwitch != NULL)
 		{
@@ -68,8 +68,8 @@ namespace winrt::ExtraVisionApp1::implementation
 
 				// 잠시 후 AI 정지
 				std::thread TurnOffAI([this, dispatcherQueue]() {
-					// 15초 동안 잠들기
-					std::this_thread::sleep_for(std::chrono::milliseconds(15000));
+					// 63초 동안 잠들기
+					std::this_thread::sleep_for(std::chrono::milliseconds(63000));
 
 					m_isAIOn.store(false);
 
@@ -88,9 +88,9 @@ namespace winrt::ExtraVisionApp1::implementation
 		}
 	}
 
+	// 프로그램 검색 버튼 이벤트 핸들러
 	void winrt::ExtraVisionApp1::implementation::CheatPage::SearchProgramBtn_Click(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&)
 	{
-		// 프로그램 검색 버튼 이벤트 핸들러
 		if (GraphicsCaptureSession::IsSupported())
 		{
 			// 윈도우가 GraphicsCapture를 지원할 때만 가능
@@ -103,6 +103,7 @@ namespace winrt::ExtraVisionApp1::implementation
 		}
 	}
 
+	// 윈도우 목록 열기
 	winrt::fire_and_forget CheatPage::OpenWindowList()
 	{
 		// 윈도우 핸들 가져오기
@@ -127,10 +128,12 @@ namespace winrt::ExtraVisionApp1::implementation
 			m_frameArrived = m_framePool.FrameArrived(auto_revoke, { this, &CheatPage::OnFrameArrived });
 			m_session = m_framePool.CreateCaptureSession(m_item);
 
+			// 이미지 프레임의 스왑 체인 설정
 			auto panelNative{ ImageFrame().as<ISwapChainPanelNative>() };
 			HRESULT hr = panelNative->SetSwapChain(m_swapChain.get());
 			if (FAILED(hr)) co_return;
 
+			// 이미지 프레임 크기 설정
 			m_imageFrameWidth = static_cast<int>(ImageFrame().ActualWidth());
 			m_imageFrameHeight = static_cast<int>(ImageFrame().ActualHeight());
 			m_imageFrameRatio = (float)m_imageFrameWidth / m_imageFrameHeight;
@@ -143,9 +146,9 @@ namespace winrt::ExtraVisionApp1::implementation
 		}
 	}
 
+	// 윈도우가 GraphicsCapture를 지원하지 않을 때의 에러 메시지
 	winrt::fire_and_forget CheatPage::ShowErrorMsg()
 	{
-		// 윈도우가 GraphicsCapture를 지원하지 않을 때의 에러 메시지
 		ContentDialog dialog{};
 		dialog.XamlRoot(this->Content().XamlRoot());
 		dialog.Title(box_value(L"오류"));
@@ -154,18 +157,20 @@ namespace winrt::ExtraVisionApp1::implementation
 		co_await dialog.ShowAsync();
 	}
 
+	// Windows Graphics Capture API 정리 함수
 	void CheatPage::Close()
 	{
-		// Windows Graphics Capture API 정리 함수
 		auto expected = true;
 		if (m_isItemLoaded.compare_exchange_strong(expected, false))
 		{
+			// 화면 캡처 세션을 중지
 			m_frameArrived.revoke();
 
 			// 화면 캡처가 중지될 때까지 대기
 			std::unique_lock<std::mutex> lock(mtx);
 			cv.wait(lock, [this] { return m_isLock == 0; });
 
+			// Direct3D 리소스 정리
 			m_framePool.Close();
 			m_session.Close();
 
@@ -178,16 +183,16 @@ namespace winrt::ExtraVisionApp1::implementation
 		}
 	}
 
+	// 캡처된 프레임이 프레임 풀에 저장될 때 발생하는 이벤트 핸들러
+	// 주요 로직을 실행하는 백그라운드 스레드
 	void CheatPage::OnFrameArrived(winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool const& sender, winrt::Windows::Foundation::IInspectable const&)
 	{
-		// 스레드 락
+		// Direct3D 리소스의 안전한 접근을 위해 스레드 락
 		m_isLock++;
 
 		// Frame Per Second 측정
 		auto start_time = std::chrono::high_resolution_clock::now();
 
-		// 캡처된 프레임이 프레임 풀에 저장될 때 발생하는 이벤트 핸들러
-		// 주요 로직을 실행하는 백그라운드 스레드
 		// ---------------------------------------------------------------------------------------------------------------
 		// 1. 프레임 가져오기
 		//
@@ -207,10 +212,11 @@ namespace winrt::ExtraVisionApp1::implementation
 		// Direct3D11CaptureFrame을 ID3D11Texture2D로 변환
 		auto frameSurface = GetDXGIInterfaceFromObject<ID3D11Texture2D>(frame.Surface());
 
-		// ID3D11Texture2D에서 CPU로 데이터 추출
+		// 프레임의 포맷을 가져오기
 		D3D11_TEXTURE2D_DESC srcDesc = {};
 		frameSurface->GetDesc(&srcDesc);
 
+		// CPU에서 사용가능한 텍스처를 생성하기 위한 포맷 설정
 		D3D11_TEXTURE2D_DESC desc = {};
 		desc.Width = srcDesc.Width;
 		desc.Height = srcDesc.Height;
@@ -224,13 +230,13 @@ namespace winrt::ExtraVisionApp1::implementation
 		desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ | D3D11_CPU_ACCESS_WRITE;
 		desc.Usage = D3D11_USAGE_STAGING;
 
-		// CPU에서 사용가능한 변수 생성
+		// CPU에서 사용가능한 텍스처 생성
 		winrt::com_ptr<ID3D11Texture2D> IDestImage;
 		HRESULT hr = m_d3dDevice->CreateTexture2D(&desc, NULL, IDestImage.put());
 		if (FAILED(hr)) return;
 		if (IDestImage == nullptr) return;
 
-		// CPU에서 사용가능한 변수로 복사
+		// CPU에서 사용가능한 텍스처로 복사
 		m_d3dContext->CopyResource(IDestImage.get(), frameSurface.get());
 
 		// CPU로 데이터 추출
@@ -256,25 +262,18 @@ namespace winrt::ExtraVisionApp1::implementation
 		m_d3dContext->Unmap(IDestImage.get(), 0);
 
 		// 변경된 윈도우의 사이즈를 반영
-		if (newSize)
-		{
-			m_framePool.Recreate(m_device, DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, m_lastSize);
-		}
+		if (newSize) m_framePool.Recreate(m_device, DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, m_lastSize);
 
-		// ---------------------------------------------------------------------------------------------------------------
-		// 2. AI 모델에 넣기
-		// 
 		// OpenCV Mat 타입으로 변환
 		// - ID3D11Texture2D은 BGRA 4채널
 		// - Row Major를 Column Major로 변환
 		cv::Mat image(imageHeight, imageWidth, CV_8UC4, imageData.data());
 
+		// ---------------------------------------------------------------------------------------------------------------
+		// 2. AI 모델에 넣기
+		// 
 		// 객체 탐지
 		std::vector<Detection> detections = m_detector.detect(image);
-
-		// 탐지된 객체를 이미지에 표시
-		cv::Mat boundingImage = image.clone();
-		m_detector.drawBoundingBoxMask(boundingImage, detections);
 
 		// ---------------------------------------------------------------------------------------------------------------
 		// 3. 컴퓨터 제어
@@ -291,9 +290,6 @@ namespace winrt::ExtraVisionApp1::implementation
 		int mouseMoveY = 0;
 		for (auto& item : detections)
 		{
-			// 원하는 객체가 아니면 스킵
-			//if (item.classId != 0) continue;
-
 			// 맨해튼 거리 계산
 			int centerX = item.box.x + item.box.width / 2;
 			int centerY = item.box.y + item.box.height / 2;
@@ -306,8 +302,8 @@ namespace winrt::ExtraVisionApp1::implementation
 			if (manhattanDistance < closestItemDistance)
 			{
 				closestItemDistance = manhattanDistance;
-				mouseMoveX = dx / 2 - item.box.width / 6;
-				mouseMoveY = dy / 2 + item.box.height / 6;
+				mouseMoveX = dx / 2; // - item.box.width / 6;
+				mouseMoveY = dy / 2 + item.box.height / 8;
 			}
 		}
 
@@ -327,7 +323,7 @@ namespace winrt::ExtraVisionApp1::implementation
 		float angleY = normalizedY * verticalFOV / 2;
 
 		// 각도 변화량을 픽셀 변화량으로 변환 및 마우스 민감도 적용
-		float mouseSensitivity = 1.0f;
+		float mouseSensitivity = 0.25f;
 		mouseMoveX = static_cast<int>((angleX * imageWidth / horizontalFOV) * mouseSensitivity);
 		mouseMoveY = static_cast<int>((angleY * imageHeight / verticalFOV) * mouseSensitivity);
 
@@ -348,59 +344,29 @@ namespace winrt::ExtraVisionApp1::implementation
 		// AI가 켜져있으면
 		if (m_isAIOn.load())
 		{
-			// AI 제어 방식 (1: 완전 제어, 2: 부분 제어)
-			int method = 1;
-			switch (method)
+			// AI가 컴퓨터를 완전히 제어
+			// 화면 중앙과 객체의 위치가 충분히 가까우면
+			if (abs(mouseMoveX) + abs(mouseMoveY) < 10 && closestItemDistance != 1.0E10)
 			{
-			case 1:
-				// AI가 컴퓨터를 완전히 제어
-				// 화면 중앙과 객체의 위치가 충분히 가까우면
-				if (abs(mouseMoveX) + abs(mouseMoveY) < 10 && closestItemDistance != 1.0E10)
-				{
-					// 마우스 왼쪽 버튼 클릭 이벤트 (누름)
-					input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-					SendInput(1, &input, sizeof(INPUT));
-
-					// 마우스 누름 이벤트의 확실한 작동을 위한 딜레이
-					for(int i = 0; i < 10; i++)
-						SendInput(1, &input, sizeof(INPUT));
-				}
-
-				// 마우스 이동
-				input.mi.dwFlags = MOUSEEVENTF_MOVE;
+				// 마우스 왼쪽 버튼 클릭 이벤트 (누름)
+				input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
 				SendInput(1, &input, sizeof(INPUT));
 
-				// 화면 중앙과 객체의 위치가 충분히 멀면
-				if (abs(mouseMoveX) + abs(mouseMoveY) > 10)
-				{
-					// 마우스 왼쪽 버튼 클릭 이벤트 (뗌)
-					input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+				// 마우스 누름 이벤트의 확실한 작동을 위한 딜레이
+				for (int i = 0; i < 10; i++)
 					SendInput(1, &input, sizeof(INPUT));
-				}
-				break;
+			}
 
-			case 2:
-				// AI가 컴퓨터를 부분적으로 제어
-				// 화면 중앙과 객체의 위치가 충분히 가까우면
-				if (abs(mouseMoveX) + abs(mouseMoveY) < 10 && closestItemDistance != 1.0E10)
-				{
-					// 마우스 왼쪽 버튼 클릭 이벤트 (누름)
-					input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-					SendInput(1, &input, sizeof(INPUT));
+			// 마우스 이동
+			input.mi.dwFlags = MOUSEEVENTF_MOVE;
+			SendInput(1, &input, sizeof(INPUT));
 
-					// 마우스 누름 이벤트의 확실한 작동을 위한 딜레이
-					for (int i = 0; i < 10; i++)
-						SendInput(1, &input, sizeof(INPUT));
-				}
-
-				// 화면 중앙과 객체의 위치가 충분히 멀면
-				if (abs(mouseMoveX) + abs(mouseMoveY) > 10)
-				{
-					// 마우스 왼쪽 버튼 클릭 이벤트 (뗌)
-					input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
-					SendInput(1, &input, sizeof(INPUT));
-				}
-				break;
+			// 화면 중앙과 객체의 위치가 충분히 멀면
+			if (abs(mouseMoveX) + abs(mouseMoveY) > 10)
+			{
+				// 마우스 왼쪽 버튼 클릭 이벤트 (뗌)
+				input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+				SendInput(1, &input, sizeof(INPUT));
 			}
 		}
 
@@ -408,13 +374,28 @@ namespace winrt::ExtraVisionApp1::implementation
 		// 4. UI 제어
 		// # 화면 크기를 조절할 경우 이전 프레임의 잔상이 테두리에 남는 버그가 있으나 치명적이지 않아 놔둠
 		// 
+		// 탐지된 객체를 이미지에 표시
+		cv::Mat boundingImage = image.clone();
+		m_detector.drawBoundingBoxMask(boundingImage, detections);
+
 		// cv::Mat 크기를 프레임 높이에 맞게 조절
 		cv::Mat imageUI;
 		imageHeight = m_imageFrameHeight;
 		imageWidth = m_imageFrameHeight * imageRatio;
 		cv::resize(boundingImage, imageUI, cv::Size(imageWidth, imageHeight), 0, 0, cv::INTER_LINEAR);
 
-		// cv::Mat을 ID3D11Texture2D로 변환
+		// 복사할 화면 대비 출력할 화면의 여백 측정
+		int left = (m_imageFrameWidth - imageWidth) / 2;
+
+		// 복사할 화면 영역 크기 측정
+		D3D11_BOX region = {};
+		region.left = static_cast<uint32_t>(0);
+		region.top = static_cast<uint32_t>(0);
+		region.right = static_cast<uint32_t>(imageWidth);
+		region.bottom = static_cast<uint32_t>(imageHeight);
+		region.back = 1;
+
+		// cv::Mat을 GPU에서 사용가능한 텍스처로 변환하기 위한 준비
 		IDestImage = nullptr;
 		desc = {};
 		desc.Width = imageUI.cols;
@@ -429,7 +410,7 @@ namespace winrt::ExtraVisionApp1::implementation
 		desc.CPUAccessFlags = 0;
 		desc.Usage = D3D11_USAGE_DEFAULT;
 
-		// ID3D11Texture2D 텍스처 생성
+		// cv::Mat을 GPU에서 사용가능한 텍스처로 변환
 		D3D11_SUBRESOURCE_DATA initData = {};
 		initData.pSysMem = imageUI.data;
 		initData.SysMemPitch = imageUI.cols * 4;
@@ -438,7 +419,7 @@ namespace winrt::ExtraVisionApp1::implementation
 		if (FAILED(hr)) return;
 		if (IDestImage == nullptr) return;
 
-		// SwapChain의 BackBuffer에 텍스처를 복사하고 화면에 출력
+		// SwapChain의 BackBuffer를 가져옴
 		winrt::com_ptr<ID3D11Texture2D> backBuffer;
 		hr = m_swapChain->GetBuffer(0, winrt::guid_of<ID3D11Texture2D>(), backBuffer.put_void());
 		if (FAILED(hr)) return;
@@ -457,18 +438,7 @@ namespace winrt::ExtraVisionApp1::implementation
 		m_d3dContext->OMSetRenderTargets(1, rtv.put(), nullptr);		
 		m_d3dContext->ClearRenderTargetView(rtv.get(), clearColor);
 
-		// 복사할 화면 대비 출력할 화면의 여백 측정
-		int left = (m_imageFrameWidth - imageWidth) / 2;
-
-		// 복사할 화면 영역 크기 측정
-		D3D11_BOX region = {};
-		region.left = static_cast<uint32_t>(0);
-		region.top = static_cast<uint32_t>(0);
-		region.right = static_cast<uint32_t>(imageWidth);
-		region.bottom = static_cast<uint32_t>(imageHeight);
-		region.back = 1;
-
-		// 화면 복사
+		// BackBuffer에 텍스처를 복사
 		m_d3dContext->CopySubresourceRegion(backBuffer.get(), 0, static_cast<uint32_t>(left), 0, 0, IDestImage.get(), 0, &region);
 
 		// 화면 출력
