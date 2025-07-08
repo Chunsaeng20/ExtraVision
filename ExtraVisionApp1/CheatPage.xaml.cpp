@@ -138,6 +138,11 @@ namespace winrt::ExtraVisionApp1::implementation
 			m_imageFrameHeight = static_cast<int>(ImageFrame().ActualHeight());
 			m_imageFrameRatio = (float)m_imageFrameWidth / m_imageFrameHeight;
 
+			// Frame Per Second 측정용 변수 초기화
+			m_fps = 0.0;
+			m_frameCount = 0;
+			m_startTime = std::chrono::high_resolution_clock::now();
+
 			// 동기화
 			m_isItemLoaded.store(true);
 
@@ -189,9 +194,6 @@ namespace winrt::ExtraVisionApp1::implementation
 	{
 		// Direct3D 리소스의 안전한 접근을 위해 스레드 락
 		m_isLock++;
-
-		// Frame Per Second 측정
-		auto start_time = std::chrono::high_resolution_clock::now();
 
 		// ---------------------------------------------------------------------------------------------------------------
 		// 1. 프레임 가져오기
@@ -370,6 +372,24 @@ namespace winrt::ExtraVisionApp1::implementation
 			}
 		}
 
+		// Frame Per Second 측정
+		m_frameCount++;
+		auto current_time = std::chrono::high_resolution_clock::now();
+		std::chrono::duration<double> elapsed_seconds = current_time - m_startTime;
+
+		// 1초마다 FPS를 계산
+		if (elapsed_seconds.count() >= 1.0)
+		{
+			m_fps = m_frameCount / elapsed_seconds.count();
+			m_startTime = current_time;
+			m_frameCount = 0;
+		}
+
+		// FPS값을 문자열로 변환
+		std::stringstream ss;
+		ss << std::fixed << std::setprecision(2) << "FPS: " << m_fps;
+		std::string fps_text = ss.str();
+
 		// ---------------------------------------------------------------------------------------------------------------
 		// 4. UI 제어
 		// # 화면 크기를 조절할 경우 이전 프레임의 잔상이 테두리에 남는 버그가 있으나 치명적이지 않아 놔둠
@@ -383,6 +403,9 @@ namespace winrt::ExtraVisionApp1::implementation
 		imageHeight = m_imageFrameHeight;
 		imageWidth = m_imageFrameHeight * imageRatio;
 		cv::resize(boundingImage, imageUI, cv::Size(imageWidth, imageHeight), 0, 0, cv::INTER_LINEAR);
+
+		// 이미지에 FPS 텍스트 추가
+		cv::putText(imageUI, fps_text, cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 255, 0, 255), 2, cv::LINE_AA);
 
 		// 복사할 화면 대비 출력할 화면의 여백 측정
 		int left = (m_imageFrameWidth - imageWidth) / 2;
@@ -446,12 +469,6 @@ namespace winrt::ExtraVisionApp1::implementation
 		m_swapChain->Present1(1, 0, &parameters);
 
 		// ---------------------------------------------------------------------------------------------------------------
-
-		// Frame Per Second 측정
-		auto end_time = std::chrono::high_resolution_clock::now();
-		auto frame_duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
-		double fps = 1000000.0 / frame_duration;
-		OutputDebugStringW((to_hstring(fps) + L"\n").c_str());
 
 		// 스레드 락 해제
 		m_isLock--;

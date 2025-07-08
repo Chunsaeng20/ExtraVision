@@ -94,6 +94,11 @@ namespace winrt::ExtraVisionApp1::implementation
 		int m_imageFrameHeight = 0;                 // 이미지 프레임 높이
 		float m_imageFrameRatio = 0.0f;             // 이미지 프레임 비율
 
+		// Frame Per Second 측정용 변수
+		double m_fps = 0.0;                                             // 초당 프레임 수
+		long long m_frameCount = 0;                                     // 프레임 카운트
+		std::chrono::high_resolution_clock::time_point m_startTime;     // 프레임 시작 시간
+
     private:
         // 비즈니스 로직 메서드
 		// Windows Graphics Capture API 정리
