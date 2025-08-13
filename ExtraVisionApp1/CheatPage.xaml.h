@@ -17,7 +17,7 @@
 #include <YOLO11.hpp>
 #include <filesystem>
 #include <onnxruntime_cxx_api.h>
-
+#include <memory> // unique_ptr를 위해 추가
 #define MODELPATH "models\\yolo11n.onnx"    // YOLO 모델 상대 경로
 #define LABELSPATH "models\\coco.names"     // 라벨 상대 경로
 
@@ -39,7 +39,7 @@ inline bool isGpuAvailable(bool useGpu = true)
     std::vector<std::string> availableProviders = Ort::GetAvailableProviders();
     auto cudaAvailable = std::find(availableProviders.begin(), availableProviders.end(), "CUDAExecutionProvider");
 
-    if (cudaAvailable != Ort::GetAvailableProviders().end()) return true;
+    if (cudaAvailable != availableProviders.end()) return true;
 	else return false;
 }
 
@@ -66,7 +66,8 @@ namespace winrt::ExtraVisionApp1::implementation
         // 비즈니스 로직 변수
         // YOLO 모델
         // # onnx runtime 관련 gpu inference 오류가 발생 <- 해결 필요
-        YOLO11Detector m_detector{ GetModelDirectory(__FILE__, MODELPATH), GetModelDirectory(__FILE__, LABELSPATH), isGpuAvailable(false) };
+        //YOLO11Detector m_detector{ GetModelDirectory(__FILE__, MODELPATH), GetModelDirectory(__FILE__, LABELSPATH), isGpuAvailable(true) };
+        std::unique_ptr<YOLO11Detector> m_detector;
 
         // 컨트롤 변수
 		std::atomic<bool> m_isAIOn = false;         // AI 활성화 여부

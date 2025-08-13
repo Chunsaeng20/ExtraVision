@@ -45,6 +45,26 @@ namespace winrt::ExtraVisionApp1::implementation
 		m_d3dDevice->GetImmediateContext(m_d3dContext.put());
 		m_dxgiDevice = m_d3dDevice.as<IDXGIDevice>();
 		m_device = CreateDirect3DDevice(m_dxgiDevice.get());
+
+		//YOLO 모델 초기화
+		try
+		{
+			bool useGpu = true; // 또는 설정값에서 가져옵니다.
+			m_detector = std::make_unique<YOLO11Detector>(
+				GetModelDirectory(__FILE__, MODELPATH),
+				GetModelDirectory(__FILE__, LABELSPATH),
+				isGpuAvailable(useGpu)
+			);
+		}
+		catch (const Ort::Exception& e)
+		{
+			//디버깅용
+			std::string errorMessage = " ";
+			errorMessage += e.what();
+			errorMessage += "\n";
+			OutputDebugStringA(errorMessage.c_str());
+
+		}
 	}
 
 	// AI 토글 버튼 이벤트 핸들러
@@ -275,203 +295,205 @@ namespace winrt::ExtraVisionApp1::implementation
 		// 2. AI 모델에 넣기
 		// 
 		// 객체 탐지
-		std::vector<Detection> detections = m_detector.detect(image);
+		if (m_detector) {
+			std::vector<Detection> detections = m_detector->detect(image); // .detect()에서 ->detect()로 접근 
 
-		// ---------------------------------------------------------------------------------------------------------------
-		// 3. 컴퓨터 제어
-		// 현재 사용하는 제어 로직
-		// -> 탐지된 객체 중 프로그램 중앙(조준점)과 가장 가까운 객체로 마우스 이동 및 사격
-		// 
-		// 탐지된 객체와 프로그램 중앙까지의 거리 측정
-		int centerWidth = imageWidth / 2;
-		int centerHeight = imageHeight / 2;
-		double closestItemDistance = 1.0E10;
+			// ---------------------------------------------------------------------------------------------------------------
+			// 3. 컴퓨터 제어
+			// 현재 사용하는 제어 로직
+			// -> 탐지된 객체 중 프로그램 중앙(조준점)과 가장 가까운 객체로 마우스 이동 및 사격
+			// 
+			// 탐지된 객체와 프로그램 중앙까지의 거리 측정
+			int centerWidth = imageWidth / 2;
+			int centerHeight = imageHeight / 2;
+			double closestItemDistance = 1.0E10;
 
-		// 마우스가 이동할 상대 좌표
-		int mouseMoveX = 0;
-		int mouseMoveY = 0;
-		for (auto& item : detections)
-		{
-			// 맨해튼 거리 계산
-			int centerX = item.box.x + item.box.width / 2;
-			int centerY = item.box.y + item.box.height / 2;
-			int dx = centerWidth - centerX;
-			int dy = centerHeight - centerY;
-
-			double manhattanDistance = std::abs(dx) + std::abs(dy);
-
-			// 최소 거리인 객체를 추출
-			if (manhattanDistance < closestItemDistance)
+			// 마우스가 이동할 상대 좌표
+			int mouseMoveX = 0;
+			int mouseMoveY = 0;
+			for (auto& item : detections)
 			{
-				closestItemDistance = manhattanDistance;
-				mouseMoveX = dx / 2; // - item.box.width / 6;
-				mouseMoveY = dy / 2 + item.box.height / 8;
+				// 맨해튼 거리 계산
+				int centerX = item.box.x + item.box.width / 2;
+				int centerY = item.box.y + item.box.height / 2;
+				int dx = centerWidth - centerX;
+				int dy = centerHeight - centerY;
+
+				double manhattanDistance = std::abs(dx) + std::abs(dy);
+
+				// 최소 거리인 객체를 추출
+				if (manhattanDistance < closestItemDistance)
+				{
+					closestItemDistance = manhattanDistance;
+					mouseMoveX = dx / 2; // - item.box.width / 6;
+					mouseMoveY = dy / 2 + item.box.height / 8;
+				}
 			}
-		}
 
-		// 마우스가 이동할 상대 좌표 보정
-		// 2차원 픽셀 변화량은 3차원 좌표계에서의 변화량과 다르므로
-		// 오차가 발생함. 따라서 보정이 필요함
-		float imageRatio = (float)imageWidth / imageHeight;
-		float horizontalFOV = 60.0f;
-		float verticalFOV = 2 * atan(tan(horizontalFOV / 2.0f) * imageRatio);
+			// 마우스가 이동할 상대 좌표 보정
+			// 2차원 픽셀 변화량은 3차원 좌표계에서의 변화량과 다르므로
+			// 오차가 발생함. 따라서 보정이 필요함
+			float imageRatio = (float)imageWidth / imageHeight;
+			float horizontalFOV = 60.0f;
+			float verticalFOV = 2 * atan(tan(horizontalFOV / 2.0f) * imageRatio);
 
-		// 객체의 상대 좌표 정규화 [-0.5, 0.5]
-		float normalizedX = (float)mouseMoveX / imageWidth;
-		float normalizedY = (float)mouseMoveY / imageHeight;
+			// 객체의 상대 좌표 정규화 [-0.5, 0.5]
+			float normalizedX = (float)mouseMoveX / imageWidth;
+			float normalizedY = (float)mouseMoveY / imageHeight;
 
-		// 정규화된 좌표를 각도 변화량으로 변환
-		float angleX = normalizedX * horizontalFOV / 2;
-		float angleY = normalizedY * verticalFOV / 2;
+			// 정규화된 좌표를 각도 변화량으로 변환
+			float angleX = normalizedX * horizontalFOV / 2;
+			float angleY = normalizedY * verticalFOV / 2;
 
-		// 각도 변화량을 픽셀 변화량으로 변환 및 마우스 민감도 적용
-		float mouseSensitivity = 0.25f;
-		mouseMoveX = static_cast<int>((angleX * imageWidth / horizontalFOV) * mouseSensitivity);
-		mouseMoveY = static_cast<int>((angleY * imageHeight / verticalFOV) * mouseSensitivity);
+			// 각도 변화량을 픽셀 변화량으로 변환 및 마우스 민감도 적용
+			float mouseSensitivity = 0.25f;
+			mouseMoveX = static_cast<int>((angleX * imageWidth / horizontalFOV) * mouseSensitivity);
+			mouseMoveY = static_cast<int>((angleY * imageHeight / verticalFOV) * mouseSensitivity);
 
-		// 프레임 기반 보정
-		// 목표에 도달하는 프레임 수를 설정
-		static int targetFrames = 1;
-		mouseMoveX = static_cast<int>(mouseMoveX / targetFrames);
-		mouseMoveY = static_cast<int>(mouseMoveY / targetFrames);
+			// 프레임 기반 보정
+			// 목표에 도달하는 프레임 수를 설정
+			static int targetFrames = 1;
+			mouseMoveX = static_cast<int>(mouseMoveX / targetFrames);
+			mouseMoveY = static_cast<int>(mouseMoveY / targetFrames);
 
-		// SendInput 함수는 윈도우 전역으로 가상 이벤트를 발생시킴
-		// 따라서 현재 포커스된 윈도우에만 입력이 발생함
-		// 이때 무결성 수준이 낮거나 같은 프로그램에만 유효한 입력이 발생함
-		INPUT input = { 0 };
-		input.type = INPUT_MOUSE;
-		input.mi.dx = -mouseMoveX;
-		input.mi.dy = -mouseMoveY;
+			// SendInput 함수는 윈도우 전역으로 가상 이벤트를 발생시킴
+			// 따라서 현재 포커스된 윈도우에만 입력이 발생함
+			// 이때 무결성 수준이 낮거나 같은 프로그램에만 유효한 입력이 발생함
+			INPUT input = { 0 };
+			input.type = INPUT_MOUSE;
+			input.mi.dx = -mouseMoveX;
+			input.mi.dy = -mouseMoveY;
 
-		// AI가 켜져있으면
-		if (m_isAIOn.load())
-		{
-			// AI가 컴퓨터를 완전히 제어
-			// 화면 중앙과 객체의 위치가 충분히 가까우면
-			if (abs(mouseMoveX) + abs(mouseMoveY) < 10 && closestItemDistance != 1.0E10)
+			// AI가 켜져있으면
+			if (m_isAIOn.load())
 			{
-				// 마우스 왼쪽 버튼 클릭 이벤트 (누름)
-				input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-				SendInput(1, &input, sizeof(INPUT));
-
-				// 마우스 누름 이벤트의 확실한 작동을 위한 딜레이
-				for (int i = 0; i < 10; i++)
+				// AI가 컴퓨터를 완전히 제어
+				// 화면 중앙과 객체의 위치가 충분히 가까우면
+				if (abs(mouseMoveX) + abs(mouseMoveY) < 10 && closestItemDistance != 1.0E10)
+				{
+					// 마우스 왼쪽 버튼 클릭 이벤트 (누름)
+					input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
 					SendInput(1, &input, sizeof(INPUT));
-			}
 
-			// 마우스 이동
-			input.mi.dwFlags = MOUSEEVENTF_MOVE;
-			SendInput(1, &input, sizeof(INPUT));
+					// 마우스 누름 이벤트의 확실한 작동을 위한 딜레이
+					for (int i = 0; i < 10; i++)
+						SendInput(1, &input, sizeof(INPUT));
+				}
 
-			// 화면 중앙과 객체의 위치가 충분히 멀면
-			if (abs(mouseMoveX) + abs(mouseMoveY) > 10)
-			{
-				// 마우스 왼쪽 버튼 클릭 이벤트 (뗌)
-				input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+				// 마우스 이동
+				input.mi.dwFlags = MOUSEEVENTF_MOVE;
 				SendInput(1, &input, sizeof(INPUT));
+
+				// 화면 중앙과 객체의 위치가 충분히 멀면
+				if (abs(mouseMoveX) + abs(mouseMoveY) > 10)
+				{
+					// 마우스 왼쪽 버튼 클릭 이벤트 (뗌)
+					input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+					SendInput(1, &input, sizeof(INPUT));
+				}
 			}
+
+			// Frame Per Second 측정
+			m_frameCount++;
+			auto current_time = std::chrono::high_resolution_clock::now();
+			std::chrono::duration<double> elapsed_seconds = current_time - m_startTime;
+
+			// 1초마다 FPS를 계산
+			if (elapsed_seconds.count() >= 1.0)
+			{
+				m_fps = m_frameCount / elapsed_seconds.count();
+				m_startTime = current_time;
+				m_frameCount = 0;
+			}
+
+			// FPS값을 문자열로 변환
+			std::stringstream ss;
+			ss << std::fixed << std::setprecision(2) << "FPS: " << m_fps;
+			std::string fps_text = ss.str();
+
+			// ---------------------------------------------------------------------------------------------------------------
+			// 4. UI 제어
+			// # 화면 크기를 조절할 경우 이전 프레임의 잔상이 테두리에 남는 버그가 있으나 치명적이지 않아 놔둠
+			// 
+			// 탐지된 객체를 이미지에 표시
+			cv::Mat boundingImage = image.clone();
+			m_detector->drawBoundingBoxMask(boundingImage, detections); //.drawBoundingBoxMask()에서 ->drawBoundingBoxMask()로 접근
+
+			// cv::Mat 크기를 프레임 높이에 맞게 조절
+			cv::Mat imageUI;
+			imageHeight = m_imageFrameHeight;
+			imageWidth = m_imageFrameHeight * imageRatio;
+			cv::resize(boundingImage, imageUI, cv::Size(imageWidth, imageHeight), 0, 0, cv::INTER_LINEAR);
+
+			// 이미지에 FPS 텍스트 추가
+			cv::putText(imageUI, fps_text, cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 255, 0, 255), 2, cv::LINE_AA);
+
+			// 복사할 화면 대비 출력할 화면의 여백 측정
+			int left = (m_imageFrameWidth - imageWidth) / 2;
+
+			// 복사할 화면 영역 크기 측정
+			D3D11_BOX region = {};
+			region.left = static_cast<uint32_t>(0);
+			region.top = static_cast<uint32_t>(0);
+			region.right = static_cast<uint32_t>(imageWidth);
+			region.bottom = static_cast<uint32_t>(imageHeight);
+			region.back = 1;
+
+			// cv::Mat을 GPU에서 사용가능한 텍스처로 변환하기 위한 준비
+			IDestImage = nullptr;
+			desc = {};
+			desc.Width = imageUI.cols;
+			desc.Height = imageUI.rows;
+			desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+			desc.ArraySize = 1;
+			desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+			desc.MiscFlags = 0;
+			desc.SampleDesc.Count = 1;
+			desc.SampleDesc.Quality = 0;
+			desc.MipLevels = 1;
+			desc.CPUAccessFlags = 0;
+			desc.Usage = D3D11_USAGE_DEFAULT;
+
+			// cv::Mat을 GPU에서 사용가능한 텍스처로 변환
+			D3D11_SUBRESOURCE_DATA initData = {};
+			initData.pSysMem = imageUI.data;
+			initData.SysMemPitch = imageUI.cols * 4;
+			initData.SysMemSlicePitch = imageUI.cols * imageUI.rows * 4;
+			hr = m_d3dDevice->CreateTexture2D(&desc, &initData, IDestImage.put());
+			if (FAILED(hr)) return;
+			if (IDestImage == nullptr) return;
+
+			// SwapChain의 BackBuffer를 가져옴
+			winrt::com_ptr<ID3D11Texture2D> backBuffer;
+			hr = m_swapChain->GetBuffer(0, winrt::guid_of<ID3D11Texture2D>(), backBuffer.put_void());
+			if (FAILED(hr)) return;
+
+			// 렌더 타겟 뷰 생성
+			winrt::com_ptr<ID3D11RenderTargetView> rtv;
+			D3D11_RENDER_TARGET_VIEW_DESC rtvDesc = {};
+			rtvDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+			rtvDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+			rtvDesc.Texture2D.MipSlice = 0;
+			hr = m_d3dDevice->CreateRenderTargetView(backBuffer.get(), &rtvDesc, rtv.put());
+			if (FAILED(hr)) return;
+
+			// 화면 클리어
+			float clearColor[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+			m_d3dContext->OMSetRenderTargets(1, rtv.put(), nullptr);
+			m_d3dContext->ClearRenderTargetView(rtv.get(), clearColor);
+
+			// BackBuffer에 텍스처를 복사
+			m_d3dContext->CopySubresourceRegion(backBuffer.get(), 0, static_cast<uint32_t>(left), 0, 0, IDestImage.get(), 0, &region);
+
+			// 화면 출력
+			DXGI_PRESENT_PARAMETERS parameters = { 0 };
+			m_swapChain->Present1(1, 0, &parameters);
+
+			// ---------------------------------------------------------------------------------------------------------------
+
+			// 스레드 락 해제
+			m_isLock--;
+			cv.notify_all();
 		}
-
-		// Frame Per Second 측정
-		m_frameCount++;
-		auto current_time = std::chrono::high_resolution_clock::now();
-		std::chrono::duration<double> elapsed_seconds = current_time - m_startTime;
-
-		// 1초마다 FPS를 계산
-		if (elapsed_seconds.count() >= 1.0)
-		{
-			m_fps = m_frameCount / elapsed_seconds.count();
-			m_startTime = current_time;
-			m_frameCount = 0;
-		}
-
-		// FPS값을 문자열로 변환
-		std::stringstream ss;
-		ss << std::fixed << std::setprecision(2) << "FPS: " << m_fps;
-		std::string fps_text = ss.str();
-
-		// ---------------------------------------------------------------------------------------------------------------
-		// 4. UI 제어
-		// # 화면 크기를 조절할 경우 이전 프레임의 잔상이 테두리에 남는 버그가 있으나 치명적이지 않아 놔둠
-		// 
-		// 탐지된 객체를 이미지에 표시
-		cv::Mat boundingImage = image.clone();
-		m_detector.drawBoundingBoxMask(boundingImage, detections);
-
-		// cv::Mat 크기를 프레임 높이에 맞게 조절
-		cv::Mat imageUI;
-		imageHeight = m_imageFrameHeight;
-		imageWidth = m_imageFrameHeight * imageRatio;
-		cv::resize(boundingImage, imageUI, cv::Size(imageWidth, imageHeight), 0, 0, cv::INTER_LINEAR);
-
-		// 이미지에 FPS 텍스트 추가
-		cv::putText(imageUI, fps_text, cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 255, 0, 255), 2, cv::LINE_AA);
-
-		// 복사할 화면 대비 출력할 화면의 여백 측정
-		int left = (m_imageFrameWidth - imageWidth) / 2;
-
-		// 복사할 화면 영역 크기 측정
-		D3D11_BOX region = {};
-		region.left = static_cast<uint32_t>(0);
-		region.top = static_cast<uint32_t>(0);
-		region.right = static_cast<uint32_t>(imageWidth);
-		region.bottom = static_cast<uint32_t>(imageHeight);
-		region.back = 1;
-
-		// cv::Mat을 GPU에서 사용가능한 텍스처로 변환하기 위한 준비
-		IDestImage = nullptr;
-		desc = {};
-		desc.Width = imageUI.cols;
-		desc.Height = imageUI.rows;
-		desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-		desc.ArraySize = 1;
-		desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
-		desc.MiscFlags = 0;
-		desc.SampleDesc.Count = 1;
-		desc.SampleDesc.Quality = 0;
-		desc.MipLevels = 1;
-		desc.CPUAccessFlags = 0;
-		desc.Usage = D3D11_USAGE_DEFAULT;
-
-		// cv::Mat을 GPU에서 사용가능한 텍스처로 변환
-		D3D11_SUBRESOURCE_DATA initData = {};
-		initData.pSysMem = imageUI.data;
-		initData.SysMemPitch = imageUI.cols * 4;
-		initData.SysMemSlicePitch = imageUI.cols * imageUI.rows * 4;
-		hr = m_d3dDevice->CreateTexture2D(&desc, &initData, IDestImage.put());
-		if (FAILED(hr)) return;
-		if (IDestImage == nullptr) return;
-
-		// SwapChain의 BackBuffer를 가져옴
-		winrt::com_ptr<ID3D11Texture2D> backBuffer;
-		hr = m_swapChain->GetBuffer(0, winrt::guid_of<ID3D11Texture2D>(), backBuffer.put_void());
-		if (FAILED(hr)) return;
-
-		// 렌더 타겟 뷰 생성
-		winrt::com_ptr<ID3D11RenderTargetView> rtv;
-		D3D11_RENDER_TARGET_VIEW_DESC rtvDesc = {};
-		rtvDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-		rtvDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
-		rtvDesc.Texture2D.MipSlice = 0;
-		hr = m_d3dDevice->CreateRenderTargetView(backBuffer.get(), &rtvDesc, rtv.put());
-		if (FAILED(hr)) return;
-
-		// 화면 클리어
-		float clearColor[] = { 1.0f, 1.0f, 1.0f, 1.0f };
-		m_d3dContext->OMSetRenderTargets(1, rtv.put(), nullptr);		
-		m_d3dContext->ClearRenderTargetView(rtv.get(), clearColor);
-
-		// BackBuffer에 텍스처를 복사
-		m_d3dContext->CopySubresourceRegion(backBuffer.get(), 0, static_cast<uint32_t>(left), 0, 0, IDestImage.get(), 0, &region);
-
-		// 화면 출력
-		DXGI_PRESENT_PARAMETERS parameters = { 0 };
-		m_swapChain->Present1(1, 0, &parameters);
-
-		// ---------------------------------------------------------------------------------------------------------------
-
-		// 스레드 락 해제
-		m_isLock--;
-		cv.notify_all();
 	}
 }
