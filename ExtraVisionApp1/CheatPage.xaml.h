@@ -65,8 +65,7 @@ namespace winrt::ExtraVisionApp1::implementation
     private:
         // 비즈니스 로직 변수
         // YOLO 모델
-        // # onnx runtime 관련 gpu inference 오류가 발생 <- 해결 필요
-        YOLO11Detector m_detector{ GetModelDirectory(__FILE__, MODELPATH), GetModelDirectory(__FILE__, LABELSPATH), isGpuAvailable(false) };
+        YOLO11Detector m_detector{ GetModelDirectory(__FILE__, MODELPATH), GetModelDirectory(__FILE__, LABELSPATH), isGpuAvailable(true) };
 
         // 컨트롤 변수
 		std::atomic<bool> m_isAIOn = false;         // AI 활성화 여부
@@ -97,7 +96,8 @@ namespace winrt::ExtraVisionApp1::implementation
 		// Frame Per Second 측정용 변수
 		double m_fps = 0.0;                                             // 초당 프레임 수
 		long long m_frameCount = 0;                                     // 프레임 카운트
-		std::chrono::high_resolution_clock::time_point m_startTime;     // 프레임 시작 시간
+		std::chrono::high_resolution_clock::time_point m_startTime;     // 프레임 시작 시각
+        std::chrono::high_resolution_clock::time_point m_prevFrameTime; // 이전 프레임 종료 시각
 
     private:
         // 비즈니스 로직 메서드

@@ -142,6 +142,7 @@ namespace winrt::ExtraVisionApp1::implementation
 			m_fps = 0.0;
 			m_frameCount = 0;
 			m_startTime = std::chrono::high_resolution_clock::now();
+			m_prevFrameTime = std::chrono::high_resolution_clock::now();
 
 			// 동기화
 			m_isItemLoaded.store(true);
@@ -372,12 +373,17 @@ namespace winrt::ExtraVisionApp1::implementation
 			}
 		}
 
-		// Frame Per Second 측정
+		// Frame Per Second와 Frame Time 측정
 		m_frameCount++;
 		auto current_time = std::chrono::high_resolution_clock::now();
-		std::chrono::duration<double> elapsed_seconds = current_time - m_startTime;
+
+		// Frame Time 측정
+		std::chrono::duration<double> elapsed_seconds = current_time - m_prevFrameTime;
+		double frame_time_ms = elapsed_seconds.count() * 1000.0;
+		m_prevFrameTime = current_time;
 
 		// 1초마다 FPS를 계산
+		elapsed_seconds = current_time - m_startTime;
 		if (elapsed_seconds.count() >= 1.0)
 		{
 			m_fps = m_frameCount / elapsed_seconds.count();
@@ -385,10 +391,15 @@ namespace winrt::ExtraVisionApp1::implementation
 			m_frameCount = 0;
 		}
 
-		// FPS값을 문자열로 변환
+		// FPS값과 Frame Time값을 문자열로 변환
 		std::stringstream ss;
-		ss << std::fixed << std::setprecision(2) << "FPS: " << m_fps;
+		ss << std::fixed << std::setprecision(2);
+		ss << "FPS: " << m_fps;
 		std::string fps_text = ss.str();
+
+		ss.str("");
+		ss << "Frame Time: " << frame_time_ms << "ms";
+		std::string frameTime_text = ss.str();
 
 		// ---------------------------------------------------------------------------------------------------------------
 		// 4. UI 제어
@@ -404,8 +415,9 @@ namespace winrt::ExtraVisionApp1::implementation
 		imageWidth = m_imageFrameHeight * imageRatio;
 		cv::resize(boundingImage, imageUI, cv::Size(imageWidth, imageHeight), 0, 0, cv::INTER_LINEAR);
 
-		// 이미지에 FPS 텍스트 추가
-		cv::putText(imageUI, fps_text, cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 255, 0, 255), 2, cv::LINE_AA);
+		// 이미지에 통계 텍스트 추가
+		cv::putText(imageUI, fps_text, cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0, 255, 0, 255), 2, cv::LINE_AA);
+		cv::putText(imageUI, frameTime_text, cv::Point(10, 60), cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0, 255, 0, 255), 2, cv::LINE_AA);
 
 		// 복사할 화면 대비 출력할 화면의 여백 측정
 		int left = (m_imageFrameWidth - imageWidth) / 2;
