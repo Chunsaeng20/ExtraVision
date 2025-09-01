@@ -74,6 +74,12 @@ namespace winrt::ExtraVisionApp1::implementation
 		std::condition_variable cv;                 // 스레드 동기화를 위한 조건 변수
 		std::mutex mtx;                             // 스레드 동기화를 위한 뮤텍스
 
+        // 소비자 스레드 변수
+        std::thread m_consumerThread;                       // 소비자 스레드 전역 객체
+        std::atomic<bool> m_shouldExit = false;             // 소비자 스레드를 종료시킬지 여부
+        std::mutex m_detectQueueMutex;                      // 큐 동기화를 위한 뮤텍스
+        std::queue<std::vector<Detection>> m_detectQueue;   // YOLO 탐지 결과를 저장하기 위한 큐
+
         // Windows Graphics Capture API
 		winrt::Windows::Graphics::Capture::GraphicsCaptureItem m_item{ nullptr };                           // 캡처 아이템
 		winrt::Windows::Graphics::Capture::GraphicsCaptureSession m_session{ nullptr };                     // 캡처 세션
@@ -93,6 +99,10 @@ namespace winrt::ExtraVisionApp1::implementation
 		int m_imageFrameHeight = 0;                 // 이미지 프레임 높이
 		float m_imageFrameRatio = 0.0f;             // 이미지 프레임 비율
 
+        // 이미지 크기
+        std::atomic<int> m_imageWidth = 0;          // 캡처하는 화면 너비
+        std::atomic<int> m_imageHeight = 0;         // 캡처하는 화면 높이
+
 		// Frame Per Second 측정용 변수
 		double m_fps = 0.0;                                             // 초당 프레임 수
 		long long m_frameCount = 0;                                     // 프레임 카운트
@@ -101,7 +111,7 @@ namespace winrt::ExtraVisionApp1::implementation
 
     private:
         // 비즈니스 로직 메서드
-		// Windows Graphics Capture API 정리
+		// Windows Graphics Capture API 및 소비자 스레드 정리
         void Close();
 
         // 윈도우 목록 열기
@@ -110,8 +120,11 @@ namespace winrt::ExtraVisionApp1::implementation
 		// 윈도우가 GraphicsCapture를 지원하지 않을 때의 에러 메시지
         winrt::fire_and_forget ShowErrorMsg();        
 
-		// 프레임 도착 이벤트 핸들러
+		// 프레임 도착 이벤트 핸들러 (컨텐츠 생산자)
         void OnFrameArrived(winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool const& sender, winrt::Windows::Foundation::IInspectable const& args);
+
+        // 객체 선택 및 추적 (컨텐츠 소비자)
+        void SelectAndTrackObject();
     };
 }
 

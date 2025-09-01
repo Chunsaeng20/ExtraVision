@@ -117,38 +117,58 @@ namespace winrt::ExtraVisionApp1::implementation
 		auto item = co_await picker.PickSingleItemAsync();
 		if (item != nullptr)
 		{
-			// 화면 캡처 정지
-			Close();
+			// OnFrameArrived 스레드 설정
+			{
+				// 화면 캡처 정지
+				Close();
 
-			// 가져온 아이템으로 초기화
-			m_item = item;
-			m_lastSize = m_item.Size();
-			m_swapChain = CreateDXGISwapChain(m_d3dDevice, static_cast<uint32_t>(m_lastSize.Width), static_cast<uint32_t>(m_lastSize.Height), static_cast<DXGI_FORMAT>(DirectXPixelFormat::B8G8R8A8UIntNormalized), 2);
-			m_framePool = Direct3D11CaptureFramePool::CreateFreeThreaded(m_device, DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, m_lastSize);
-			m_frameArrived = m_framePool.FrameArrived(auto_revoke, { this, &CheatPage::OnFrameArrived });
-			m_session = m_framePool.CreateCaptureSession(m_item);
+				// 가져온 아이템으로 초기화
+				m_item = item;
+				m_lastSize = m_item.Size();
+				m_swapChain = CreateDXGISwapChain(m_d3dDevice, static_cast<uint32_t>(m_lastSize.Width), static_cast<uint32_t>(m_lastSize.Height), static_cast<DXGI_FORMAT>(DirectXPixelFormat::B8G8R8A8UIntNormalized), 2);
+				m_framePool = Direct3D11CaptureFramePool::CreateFreeThreaded(m_device, DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, m_lastSize);
+				m_frameArrived = m_framePool.FrameArrived(auto_revoke, { this, &CheatPage::OnFrameArrived });
+				m_session = m_framePool.CreateCaptureSession(m_item);
 
-			// 이미지 프레임의 스왑 체인 설정
-			auto panelNative{ ImageFrame().as<ISwapChainPanelNative>() };
-			HRESULT hr = panelNative->SetSwapChain(m_swapChain.get());
-			if (FAILED(hr)) co_return;
+				// 이미지 프레임의 스왑 체인 설정
+				auto panelNative{ ImageFrame().as<ISwapChainPanelNative>() };
+				HRESULT hr = panelNative->SetSwapChain(m_swapChain.get());
+				if (FAILED(hr)) co_return;
 
-			// 이미지 프레임 크기 설정
-			m_imageFrameWidth = static_cast<int>(ImageFrame().ActualWidth());
-			m_imageFrameHeight = static_cast<int>(ImageFrame().ActualHeight());
-			m_imageFrameRatio = (float)m_imageFrameWidth / m_imageFrameHeight;
+				// 이미지 프레임 크기 설정
+				m_imageFrameWidth = static_cast<int>(ImageFrame().ActualWidth());
+				m_imageFrameHeight = static_cast<int>(ImageFrame().ActualHeight());
+				m_imageFrameRatio = (float)m_imageFrameWidth / m_imageFrameHeight;
 
-			// Frame Per Second 측정용 변수 초기화
-			m_fps = 0.0;
-			m_frameCount = 0;
-			m_startTime = std::chrono::high_resolution_clock::now();
-			m_prevFrameTime = std::chrono::high_resolution_clock::now();
+				// Frame Per Second 측정용 변수 초기화
+				m_fps = 0.0;
+				m_frameCount = 0;
+				m_startTime = std::chrono::high_resolution_clock::now();
+				m_prevFrameTime = std::chrono::high_resolution_clock::now();
 
-			// 동기화
-			m_isItemLoaded.store(true);
+				// 동기화
+				m_isItemLoaded.store(true);
 
-			// 화면 캡처 시작
-			m_session.StartCapture();
+				// 화면 캡처 시작
+				m_session.StartCapture();
+			}
+
+			// SelectAndTrackObject 스레드 설정
+			{
+				// 작업 중인 스레드가 있으면 종료시킴
+				if (m_consumerThread.joinable())
+				{
+					// 작업 중인 스레드를 안전하게 종료시킴
+					m_shouldExit.store(true);
+					m_consumerThread.join();
+
+					// 종료 신호 플래그 초기화
+					m_shouldExit.store(false);
+				}
+
+				// 새로운 작업 스레드 시작
+				m_consumerThread = std::thread(&CheatPage::SelectAndTrackObject, this);
+			}
 		}
 	}
 
@@ -163,7 +183,7 @@ namespace winrt::ExtraVisionApp1::implementation
 		co_await dialog.ShowAsync();
 	}
 
-	// Windows Graphics Capture API 정리 함수
+	// Windows Graphics Capture API 및 소비자 스레드 정리 함수
 	void CheatPage::Close()
 	{
 		auto expected = true;
@@ -186,6 +206,17 @@ namespace winrt::ExtraVisionApp1::implementation
 			m_item = nullptr;
 
 			m_isItemLoaded.store(false);
+		}
+
+		// 작업 중인 스레드가 있으면 종료시킴
+		if (m_consumerThread.joinable())
+		{
+			// 작업 중인 스레드를 안전하게 종료시킴
+			m_shouldExit.store(true);
+			m_consumerThread.join();
+
+			// 종료 신호 플래그 초기화
+			m_shouldExit.store(false);
 		}
 	}
 
@@ -253,6 +284,11 @@ namespace winrt::ExtraVisionApp1::implementation
 		int imageRowPitch = static_cast<int>(resource.RowPitch);
 		int imageWidth = imageRowPitch / 4;
 		int imageSize = imageRowPitch * imageHeight;
+		float imageRatio = (float)imageWidth / imageHeight;
+
+		// 캡처하는 화면 크기 저장
+		m_imageWidth.store(imageWidth);
+		m_imageHeight.store(imageHeight);
 
 		// 이미지 데이터 추출
 		std::vector<BYTE> imageData;
@@ -274,105 +310,21 @@ namespace winrt::ExtraVisionApp1::implementation
 
 		// ---------------------------------------------------------------------------------------------------------------
 		// 2. AI 모델에 넣기
-		// 
+		//
 		// 객체 탐지
 		std::vector<Detection> detections = m_detector.detect(image);
 
 		// ---------------------------------------------------------------------------------------------------------------
-		// 3. 컴퓨터 제어
-		// 현재 사용하는 제어 로직
-		// -> 탐지된 객체 중 프로그램 중앙(조준점)과 가장 가까운 객체로 마우스 이동 및 사격
-		// 
-		// 탐지된 객체와 프로그램 중앙까지의 거리 측정
-		int centerWidth = imageWidth / 2;
-		int centerHeight = imageHeight / 2;
-		double closestItemDistance = 1.0E10;
-
-		// 마우스가 이동할 상대 좌표
-		int mouseMoveX = 0;
-		int mouseMoveY = 0;
-		for (auto& item : detections)
+		// 3. 큐에 결과 넣기
+		//
 		{
-			// 맨해튼 거리 계산
-			int centerX = item.box.x + item.box.width / 2;
-			int centerY = item.box.y + item.box.height / 2;
-			int dx = centerWidth - centerX;
-			int dy = centerHeight - centerY;
-
-			double manhattanDistance = std::abs(dx) + std::abs(dy);
-
-			// 최소 거리인 객체를 추출
-			if (manhattanDistance < closestItemDistance)
-			{
-				closestItemDistance = manhattanDistance;
-				mouseMoveX = dx / 2; // - item.box.width / 6;
-				mouseMoveY = dy / 2 + item.box.height / 8;
-			}
+			std::lock_guard<std::mutex> lock(m_detectQueueMutex);
+			m_detectQueue.push(detections);
 		}
 
-		// 마우스가 이동할 상대 좌표 보정
-		// 2차원 픽셀 변화량은 3차원 좌표계에서의 변화량과 다르므로
-		// 오차가 발생함. 따라서 보정이 필요함
-		float imageRatio = (float)imageWidth / imageHeight;
-		float horizontalFOV = 60.0f;
-		float verticalFOV = 2 * atan(tan(horizontalFOV / 2.0f) * imageRatio);
-
-		// 객체의 상대 좌표 정규화 [-0.5, 0.5]
-		float normalizedX = (float)mouseMoveX / imageWidth;
-		float normalizedY = (float)mouseMoveY / imageHeight;
-
-		// 정규화된 좌표를 각도 변화량으로 변환
-		float angleX = normalizedX * horizontalFOV / 2;
-		float angleY = normalizedY * verticalFOV / 2;
-
-		// 각도 변화량을 픽셀 변화량으로 변환 및 마우스 민감도 적용
-		float mouseSensitivity = 0.25f;
-		mouseMoveX = static_cast<int>((angleX * imageWidth / horizontalFOV) * mouseSensitivity);
-		mouseMoveY = static_cast<int>((angleY * imageHeight / verticalFOV) * mouseSensitivity);
-
-		// 프레임 기반 보정
-		// 목표에 도달하는 프레임 수를 설정
-		static int targetFrames = 1;
-		mouseMoveX = static_cast<int>(mouseMoveX / targetFrames);
-		mouseMoveY = static_cast<int>(mouseMoveY / targetFrames);
-
-		// SendInput 함수는 윈도우 전역으로 가상 이벤트를 발생시킴
-		// 따라서 현재 포커스된 윈도우에만 입력이 발생함
-		// 이때 무결성 수준이 낮거나 같은 프로그램에만 유효한 입력이 발생함
-		INPUT input = { 0 };
-		input.type = INPUT_MOUSE;
-		input.mi.dx = -mouseMoveX;
-		input.mi.dy = -mouseMoveY;
-
-		// AI가 켜져있으면
-		if (m_isAIOn.load())
-		{
-			// AI가 컴퓨터를 완전히 제어
-			// 화면 중앙과 객체의 위치가 충분히 가까우면
-			if (abs(mouseMoveX) + abs(mouseMoveY) < 10 && closestItemDistance != 1.0E10)
-			{
-				// 마우스 왼쪽 버튼 클릭 이벤트 (누름)
-				input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-				SendInput(1, &input, sizeof(INPUT));
-
-				// 마우스 누름 이벤트의 확실한 작동을 위한 딜레이
-				for (int i = 0; i < 10; i++)
-					SendInput(1, &input, sizeof(INPUT));
-			}
-
-			// 마우스 이동
-			input.mi.dwFlags = MOUSEEVENTF_MOVE;
-			SendInput(1, &input, sizeof(INPUT));
-
-			// 화면 중앙과 객체의 위치가 충분히 멀면
-			if (abs(mouseMoveX) + abs(mouseMoveY) > 10)
-			{
-				// 마우스 왼쪽 버튼 클릭 이벤트 (뗌)
-				input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
-				SendInput(1, &input, sizeof(INPUT));
-			}
-		}
-
+		// ---------------------------------------------------------------------------------------------------------------
+		// 4. UI 제어
+		//
 		// Frame Per Second와 Frame Time 측정
 		m_frameCount++;
 		auto current_time = std::chrono::high_resolution_clock::now();
@@ -391,20 +343,17 @@ namespace winrt::ExtraVisionApp1::implementation
 			m_frameCount = 0;
 		}
 
-		// FPS값과 Frame Time값을 문자열로 변환
+		// FPS값을 문자열로 변환
 		std::stringstream ss;
 		ss << std::fixed << std::setprecision(2);
 		ss << "FPS: " << m_fps;
 		std::string fps_text = ss.str();
 
+		// Frame Time 값을 문자열로 변환
 		ss.str("");
 		ss << "Frame Time: " << frame_time_ms << "ms";
 		std::string frameTime_text = ss.str();
 
-		// ---------------------------------------------------------------------------------------------------------------
-		// 4. UI 제어
-		// # 화면 크기를 조절할 경우 이전 프레임의 잔상이 테두리에 남는 버그가 있으나 치명적이지 않아 놔둠
-		// 
 		// 탐지된 객체를 이미지에 표시
 		cv::Mat boundingImage = image.clone();
 		m_detector.drawBoundingBoxMask(boundingImage, detections);
@@ -415,26 +364,22 @@ namespace winrt::ExtraVisionApp1::implementation
 		imageWidth = m_imageFrameHeight * imageRatio;
 		cv::resize(boundingImage, imageUI, cv::Size(imageWidth, imageHeight), 0, 0, cv::INTER_LINEAR);
 
+		// 이미지 프레임에 꽉차게 이미지 조절
+		int horizontalPadding = (m_imageFrameWidth - imageWidth) > 0 ? m_imageFrameWidth - imageWidth : 0;
+		int left = horizontalPadding / 2;
+		int right = horizontalPadding - left;
+		cv::Mat expandedImageUI;
+		cv::copyMakeBorder(imageUI, expandedImageUI, 0, 0, left, right, cv::BORDER_CONSTANT, cv::Scalar(255, 255, 255, 255));
+
 		// 이미지에 통계 텍스트 추가
-		cv::putText(imageUI, fps_text, cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0, 255, 0, 255), 2, cv::LINE_AA);
-		cv::putText(imageUI, frameTime_text, cv::Point(10, 60), cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0, 255, 0, 255), 2, cv::LINE_AA);
-
-		// 복사할 화면 대비 출력할 화면의 여백 측정
-		int left = (m_imageFrameWidth - imageWidth) / 2;
-
-		// 복사할 화면 영역 크기 측정
-		D3D11_BOX region = {};
-		region.left = static_cast<uint32_t>(0);
-		region.top = static_cast<uint32_t>(0);
-		region.right = static_cast<uint32_t>(imageWidth);
-		region.bottom = static_cast<uint32_t>(imageHeight);
-		region.back = 1;
+		cv::putText(expandedImageUI, fps_text, cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0, 255, 0, 255), 2, cv::LINE_AA);
+		cv::putText(expandedImageUI, frameTime_text, cv::Point(10, 60), cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0, 255, 0, 255), 2, cv::LINE_AA);
 
 		// cv::Mat을 GPU에서 사용가능한 텍스처로 변환하기 위한 준비
 		IDestImage = nullptr;
 		desc = {};
-		desc.Width = imageUI.cols;
-		desc.Height = imageUI.rows;
+		desc.Width = expandedImageUI.cols;
+		desc.Height = expandedImageUI.rows;
 		desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
 		desc.ArraySize = 1;
 		desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
@@ -447,9 +392,9 @@ namespace winrt::ExtraVisionApp1::implementation
 
 		// cv::Mat을 GPU에서 사용가능한 텍스처로 변환
 		D3D11_SUBRESOURCE_DATA initData = {};
-		initData.pSysMem = imageUI.data;
-		initData.SysMemPitch = imageUI.cols * 4;
-		initData.SysMemSlicePitch = imageUI.cols * imageUI.rows * 4;
+		initData.pSysMem = expandedImageUI.data;
+		initData.SysMemPitch = expandedImageUI.cols * 4;
+		initData.SysMemSlicePitch = expandedImageUI.cols * expandedImageUI.rows * 4;
 		hr = m_d3dDevice->CreateTexture2D(&desc, &initData, IDestImage.put());
 		if (FAILED(hr)) return;
 		if (IDestImage == nullptr) return;
@@ -470,11 +415,19 @@ namespace winrt::ExtraVisionApp1::implementation
 
 		// 화면 클리어
 		float clearColor[] = { 1.0f, 1.0f, 1.0f, 1.0f };
-		m_d3dContext->OMSetRenderTargets(1, rtv.put(), nullptr);		
+		m_d3dContext->OMSetRenderTargets(1, rtv.put(), nullptr);
 		m_d3dContext->ClearRenderTargetView(rtv.get(), clearColor);
 
+		// 이미지를 복사할 화면의 크기 측정
+		D3D11_BOX region = {};
+		region.left = static_cast<uint32_t>(0);
+		region.top = static_cast<uint32_t>(0);
+		region.right = static_cast<uint32_t>(m_imageFrameWidth);
+		region.bottom = static_cast<uint32_t>(m_imageFrameHeight);
+		region.back = 1;
+
 		// BackBuffer에 텍스처를 복사
-		m_d3dContext->CopySubresourceRegion(backBuffer.get(), 0, static_cast<uint32_t>(left), 0, 0, IDestImage.get(), 0, &region);
+		m_d3dContext->CopySubresourceRegion(backBuffer.get(), 0, 0, 0, 0, IDestImage.get(), 0, &region);
 
 		// 화면 출력
 		DXGI_PRESENT_PARAMETERS parameters = { 0 };
@@ -485,5 +438,140 @@ namespace winrt::ExtraVisionApp1::implementation
 		// 스레드 락 해제
 		m_isLock--;
 		cv.notify_all();
+	}
+
+	// OnFrameArrived에서 생성한 객체에 대한 정보를 소비
+	// 객체를 선택하고 추적함
+	void CheatPage::SelectAndTrackObject()
+	{
+		Detection lastTrackedObject;				// 마지막으로 추적한 객체
+		std::vector<Detection> lastDetectedObjects; // 마지막으로 가져온 객체 정보
+
+		int targetFrames = 1;						// 목표까지 도달한 프레임 수
+		bool hasTargetObject = false;				// 현재 추적하고 있는 객체가 있는지 여부
+		
+		while (m_shouldExit.load() == false)
+		{
+			bool isNewDataExist = false;
+
+			// 큐에서 데이터 가져오기 시도
+			{
+				std::lock_guard<std::mutex> lock(m_detectQueueMutex);
+				if (!m_detectQueue.empty())
+				{
+					lastDetectedObjects = m_detectQueue.front();
+					m_detectQueue.pop();
+					isNewDataExist = true;
+				}
+			}
+
+			// 새로운 정보가 있으면 타겟 업데이트
+			// 없으면 추적하던 기존 객체를 계속 추적
+			if (isNewDataExist)
+			{
+
+			}
+			else
+			{
+				continue;
+			}
+
+			// --- 컴퓨터 제어 ---
+			// 현재 사용하는 제어 로직
+			// -> 탐지된 객체 중 프로그램 중앙(조준점)과 가장 가까운 객체로 마우스 이동 및 사격
+
+			// --- 객체 선택 ---
+			// 탐지된 객체와 프로그램 중앙까지의 거리 측정
+			int imageWidth = m_imageWidth.load();
+			int imageHeight = m_imageHeight.load();
+			int centerWidth = imageWidth / 2;
+			int centerHeight = imageHeight / 2;
+			double closestItemDistance = 1.0E10;
+
+			// 마우스가 이동할 상대 좌표
+			int mouseMoveX = 0;
+			int mouseMoveY = 0;
+			for (auto& item : lastDetectedObjects)
+			{
+				// 맨해튼 거리 계산
+				int centerX = item.box.x + item.box.width / 2;
+				int centerY = item.box.y + item.box.height / 2;
+				int dx = centerWidth - centerX;
+				int dy = centerHeight - centerY;
+
+				double manhattanDistance = std::abs(dx) + std::abs(dy);
+
+				// 최소 거리인 객체를 추출
+				if (manhattanDistance < closestItemDistance)
+				{
+					closestItemDistance = manhattanDistance;
+					mouseMoveX = dx / 2; // - item.box.width / 6;
+					mouseMoveY = dy / 2 + item.box.height / 8;
+				}
+			}
+
+			// 마우스가 이동할 상대 좌표 보정
+			// 2차원 픽셀 변화량은 3차원 좌표계에서의 변화량과 다르므로
+			// 오차가 발생함. 따라서 보정이 필요함
+			float imageRatio = (float)imageWidth / imageHeight;
+			float horizontalFOV = 60.0f;
+			float verticalFOV = 2 * atan(tan(horizontalFOV / 2.0f) * imageRatio);
+
+			// 객체의 상대 좌표 정규화 [-0.5, 0.5]
+			float normalizedX = (float)mouseMoveX / imageWidth;
+			float normalizedY = (float)mouseMoveY / imageHeight;
+
+			// 정규화된 좌표를 각도 변화량으로 변환
+			float angleX = normalizedX * horizontalFOV / 2;
+			float angleY = normalizedY * verticalFOV / 2;
+
+			// 각도 변화량을 픽셀 변화량으로 변환 및 마우스 민감도 적용
+			float mouseSensitivity = 0.25f;
+			mouseMoveX = static_cast<int>((angleX * imageWidth / horizontalFOV) * mouseSensitivity);
+			mouseMoveY = static_cast<int>((angleY * imageHeight / verticalFOV) * mouseSensitivity);
+
+			// 프레임 기반 보정
+			// 목표에 도달하는 프레임 수를 설정
+			mouseMoveX = static_cast<int>(mouseMoveX / targetFrames);
+			mouseMoveY = static_cast<int>(mouseMoveY / targetFrames);
+
+			// --- 객체 추적 ---
+			// SendInput 함수는 윈도우 전역으로 가상 이벤트를 발생시킴
+			// 따라서 현재 포커스된 윈도우에만 입력이 발생함
+			// 이때 무결성 수준이 낮거나 같은 프로그램에만 유효한 입력이 발생함
+			INPUT input = { 0 };
+			input.type = INPUT_MOUSE;
+			input.mi.dx = -mouseMoveX;
+			input.mi.dy = -mouseMoveY;
+
+			// AI가 켜져있으면
+			if (m_isAIOn.load())
+			{
+				// AI가 컴퓨터를 완전히 제어
+				// 화면 중앙과 객체의 위치가 충분히 가까우면
+				if (abs(mouseMoveX) + abs(mouseMoveY) < 10 && closestItemDistance != 1.0E10)
+				{
+					// 마우스 왼쪽 버튼 클릭 이벤트 (누름)
+					input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+					SendInput(1, &input, sizeof(INPUT));
+
+					// 마우스 누름 이벤트의 확실한 작동을 위한 딜레이
+					for (int i = 0; i < 10; i++)
+						SendInput(1, &input, sizeof(INPUT));
+				}
+
+				// 마우스 이동
+				input.mi.dwFlags = MOUSEEVENTF_MOVE;
+				SendInput(1, &input, sizeof(INPUT));
+
+				// 화면 중앙과 객체의 위치가 충분히 멀면
+				if (abs(mouseMoveX) + abs(mouseMoveY) > 10)
+				{
+					// 마우스 왼쪽 버튼 클릭 이벤트 (뗌)
+					input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+					SendInput(1, &input, sizeof(INPUT));
+				}
+			}
+		}
 	}
 }
