@@ -114,7 +114,7 @@ namespace winrt::ExtraVisionApp1::implementation
 		picker.as<IInitializeWithWindow>()->Initialize(hWnd);
 
 		// 아이템 가져오기
-		auto item = co_await picker.PickSingleItemAsync();
+		auto& item = co_await picker.PickSingleItemAsync();
 		if (item != nullptr)
 		{
 			// OnFrameArrived 스레드 설정
@@ -146,7 +146,7 @@ namespace winrt::ExtraVisionApp1::implementation
 				m_startTime = std::chrono::high_resolution_clock::now();
 				m_prevFrameTime = std::chrono::high_resolution_clock::now();
 
-				// 동기화
+				// 동기화 플래그 켜기
 				m_isItemLoaded.store(true);
 
 				// 화면 캡처 시작
@@ -199,12 +199,12 @@ namespace winrt::ExtraVisionApp1::implementation
 			// Direct3D 리소스 정리
 			m_framePool.Close();
 			m_session.Close();
-
 			m_swapChain = nullptr;
 			m_framePool = nullptr;
 			m_session = nullptr;
 			m_item = nullptr;
 
+			// 동기화 플래그 초기화
 			m_isItemLoaded.store(false);
 		}
 
@@ -221,7 +221,7 @@ namespace winrt::ExtraVisionApp1::implementation
 	}
 
 	// 캡처된 프레임이 프레임 풀에 저장될 때 발생하는 이벤트 핸들러
-	// 주요 로직을 실행하는 백그라운드 스레드
+	// 캡처 로직을 실행하는 백그라운드 스레드
 	void CheatPage::OnFrameArrived(winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool const& sender, winrt::Windows::Foundation::IInspectable const&)
 	{
 		// Direct3D 리소스의 안전한 접근을 위해 스레드 락
@@ -315,7 +315,7 @@ namespace winrt::ExtraVisionApp1::implementation
 		std::vector<Detection> detections = m_detector.detect(image);
 
 		// ---------------------------------------------------------------------------------------------------------------
-		// 3. 큐에 결과 넣기
+		// 3. 큐에 객체 탐지 결과 넣기
 		//
 		{
 			std::lock_guard<std::mutex> lock(m_detectQueueMutex);
@@ -375,7 +375,7 @@ namespace winrt::ExtraVisionApp1::implementation
 		cv::putText(expandedImageUI, fps_text, cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0, 255, 0, 255), 2, cv::LINE_AA);
 		cv::putText(expandedImageUI, frameTime_text, cv::Point(10, 60), cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0, 255, 0, 255), 2, cv::LINE_AA);
 
-		// cv::Mat을 GPU에서 사용가능한 텍스처로 변환하기 위한 준비
+		// cv::Mat을 GPU에서 사용가능한 텍스처로 변환하기 위해 준비
 		IDestImage = nullptr;
 		desc = {};
 		desc.Width = expandedImageUI.cols;
@@ -441,137 +441,273 @@ namespace winrt::ExtraVisionApp1::implementation
 	}
 
 	// OnFrameArrived에서 생성한 객체에 대한 정보를 소비
-	// 객체를 선택하고 추적함
+	// 객체를 선택하고 추적하는 로직을 실행하는 백그라운드 스레드
 	void CheatPage::SelectAndTrackObject()
 	{
-		Detection lastTrackedObject;				// 마지막으로 추적한 객체
+		// 디버그용 코드
+		std::wstringstream ss;
+		int whatHappend = 0;
+
 		std::vector<Detection> lastDetectedObjects; // 마지막으로 가져온 객체 정보
 
-		int targetFrames = 1;						// 목표까지 도달한 프레임 수
-		bool hasTargetObject = false;				// 현재 추적하고 있는 객체가 있는지 여부
-		
+		float sensitivity = 0.04f;					// 민감도
+		float deadZoneRadius = 8.0f;				// 데드존 반경
+		float smoothing = 0.8f;						// 움직임을 부드럽게 만듬
+		int prevMouseMoveX = 0;						// 이전 마우스 X좌표
+		int prevMouseMoveY = 0;						// 이전 마우스 Y좌표
+		int maxMovementDistance = 300;				// 한 프레임에 이동할 최대 이동량
+		float verticalOffset = 0.275f;				// 객체의 어느 부분을 조준할지
+		float predictionOffset = 2.0f;				// 얼마나 멀리 예측할지
+
+		// --- '기억'을 위한 변수 추가 ---
+		bool isCurrentlyTracking = false;			// 현재 특정 객체를 추적 중인지 여부
+		Detection currentTarget;					// 현재 추적 중인 객체의 정보
+		Detection previousTarget;
+		double currentTargetDistance = 1.0E10;		// 현재 추적 중인 객체의 거리
+
+		// 타겟을 놓쳤는지 판단하기 위한 설정값
+		const float trackingLossDistanceThreshold = 100.0f; // 이전 위치에서 이 거리(픽셀) 이상 벗어나면 다른 객체로 판단
+		const int frameTolerance = 3;						// 타겟을 놓쳤을 때 몇 프레임까지 위치를 유지할지
+		int frameToleranceCount = 0;
+
+		// 사격 딜레이
+		const int fireDelay = 4;
+		int fireDelayCount = 0;
+
 		while (m_shouldExit.load() == false)
 		{
-			bool isNewDataExist = false;
+			bool isNewDataExist = false;			// 큐가 비었을 때의 플래그
 
 			// 큐에서 데이터 가져오기 시도
 			{
 				std::lock_guard<std::mutex> lock(m_detectQueueMutex);
 				if (!m_detectQueue.empty())
 				{
+					// 큐가 비어있지 않다면 데이터를 가져옴
 					lastDetectedObjects = m_detectQueue.front();
 					m_detectQueue.pop();
 					isNewDataExist = true;
 				}
 			}
 
-			// 새로운 정보가 있으면 타겟 업데이트
-			// 없으면 추적하던 기존 객체를 계속 추적
-			if (isNewDataExist)
-			{
-
-			}
-			else
-			{
-				continue;
-			}
-
-			// --- 컴퓨터 제어 ---
-			// 현재 사용하는 제어 로직
-			// -> 탐지된 객체 중 프로그램 중앙(조준점)과 가장 가까운 객체로 마우스 이동 및 사격
+			// 새로운 정보가 없으면 일단 가만히 있음
+			if (!isNewDataExist) continue;
+			// 가져온 탐지 결과가 비어있다면 일단 가만히 있음
+			else if (lastDetectedObjects.empty()) continue;
 
 			// --- 객체 선택 ---
+			// 현재 사용하는 객체 선택 로직
+			// 1. 현재 프레임에서 추적 중인 객체가 있다면 그 객체를 계속 추적
+			// 2. 추적 중인 객체를 잃어버렸다면 화면 중앙에서 가장 가까운 객체를 추적
 			// 탐지된 객체와 프로그램 중앙까지의 거리 측정
 			int imageWidth = m_imageWidth.load();
 			int imageHeight = m_imageHeight.load();
 			int centerWidth = imageWidth / 2;
 			int centerHeight = imageHeight / 2;
-			double closestItemDistance = 1.0E10;
 
-			// 마우스가 이동할 상대 좌표
-			int mouseMoveX = 0;
-			int mouseMoveY = 0;
-			for (auto& item : lastDetectedObjects)
+			Detection trackingTarget;					// 가장 유력한 추적 중인 객체의 정보
+			Detection closestTarget;					// 가장 가까운 객체의 정보
+			double minDistanceToLastTarget = 1.0E10;	// 추적 중인 객체와의 가장 가까운 거리
+			double distanceTargetToCenter = 1.0E10;		// 추적 중인 객체의 화면 중앙까지의 거리
+			double closestItemDistance = 1.0E10;		// 화면 중앙과 가장 가까운 객체의 거리
+
+			// 가져온 탐지 결과 확인
 			{
-				// 맨해튼 거리 계산
-				int centerX = item.box.x + item.box.width / 2;
-				int centerY = item.box.y + item.box.height / 2;
-				int dx = centerWidth - centerX;
-				int dy = centerHeight - centerY;
-
-				double manhattanDistance = std::abs(dx) + std::abs(dy);
-
-				// 최소 거리인 객체를 추출
-				if (manhattanDistance < closestItemDistance)
+				for (auto& item : lastDetectedObjects)
 				{
-					closestItemDistance = manhattanDistance;
-					mouseMoveX = dx / 2; // - item.box.width / 6;
-					mouseMoveY = dy / 2 + item.box.height / 8;
+					// 손 객체는 무시
+					if (item.box.x < 730 && item.box.x > 710 && item.box.y < 620 && item.box.y > 600)
+					{
+						// 손 객체의 좌표는 1080p 전체화면에서 720, 612
+						continue;
+					}
+
+					// 이전 타겟 객체의 중심 좌표
+					int lastTargetCenterX = currentTarget.box.x + currentTarget.box.width / 2;
+					int lastTargetCenterY = currentTarget.box.y + currentTarget.box.height / 2;
+
+					// 현재 객체의 중심 좌표
+					int currentItemCenterX = item.box.x + item.box.width / 2;
+					int currentItemCenterY = item.box.y + item.box.height / 2;
+
+					// 이전 타겟 객체와 현재 객체의 유클리드 거리를 계산
+					double distanceToTarget = std::sqrt(std::pow(lastTargetCenterX - currentItemCenterX, 2) + std::pow(lastTargetCenterY - currentItemCenterY, 2));
+
+					// 화면 중앙과 현재 객체의 유클리드 거리를 계산
+					double distanceToCenter = std::sqrt(std::pow(centerWidth - currentItemCenterX, 2) + std::pow(centerHeight - currentItemCenterY, 2));
+
+					// 추적 중인 객체 찾기
+					if (distanceToTarget < minDistanceToLastTarget)
+					{
+						// 가장 유력한 후보로 일단 저장
+						minDistanceToLastTarget = distanceToTarget;
+						distanceTargetToCenter = distanceToCenter;
+						trackingTarget = item;
+					}
+
+					// 화면 중앙과 가장 가까운 객체 찾기
+					if (distanceToCenter < closestItemDistance)
+					{
+						closestItemDistance = distanceToCenter;
+						closestTarget = item;
+					}
+				}
+
+				// 객체를 추적 중이었고, 추적 유지 반경 안에 이전 타겟 객체가 존재한다면 추적을 유지함
+				if (isCurrentlyTracking && minDistanceToLastTarget < trackingLossDistanceThreshold)
+				{
+					previousTarget = currentTarget;
+					currentTarget = trackingTarget; // 타겟 정보 갱신
+					currentTargetDistance = distanceTargetToCenter;
+					closestItemDistance = currentTargetDistance;
+					frameToleranceCount = 0;
+
+					// 디버그용 코드
+					whatHappend = 1;
+				}
+				// 객체를 추적 중이지 않다면
+				else if (!isCurrentlyTracking)
+				{
+					previousTarget = closestTarget;
+					currentTarget = closestTarget;	// 가장 가까운 객체를 추적
+					currentTargetDistance = closestItemDistance;
+					isCurrentlyTracking = true;
+
+					// 디버그용 코드
+					whatHappend = 2;
+				}
+				// 타겟을 놓쳤다면
+				else
+				{
+					// 허용 프레임 수까지 기다림
+					frameToleranceCount++;
+					if (frameToleranceCount < frameTolerance)
+					{
+						// 이전 타겟의 정보를 그대로 사용
+						closestItemDistance = currentTargetDistance;
+
+						// 디버그용 코드
+						whatHappend = 3;
+					}
+					// 허용치를 넘어서면 가장 가까운 객체를 추적
+					else
+					{
+						frameToleranceCount = 0;
+						previousTarget = closestTarget;
+						currentTarget = closestTarget;
+						currentTargetDistance = closestItemDistance;
+						isCurrentlyTracking = false;
+
+						// 디버그용 코드
+						whatHappend = 4;
+					}
 				}
 			}
 
-			// 마우스가 이동할 상대 좌표 보정
-			// 2차원 픽셀 변화량은 3차원 좌표계에서의 변화량과 다르므로
-			// 오차가 발생함. 따라서 보정이 필요함
-			float imageRatio = (float)imageWidth / imageHeight;
-			float horizontalFOV = 60.0f;
-			float verticalFOV = 2 * atan(tan(horizontalFOV / 2.0f) * imageRatio);
+			// 목표 객체까지의 픽셀 거리
+			int currentCenterX = currentTarget.box.x + currentTarget.box.width / 2;
+			int currentCenterY = currentTarget.box.y + currentTarget.box.height / 2;
 
-			// 객체의 상대 좌표 정규화 [-0.5, 0.5]
-			float normalizedX = (float)mouseMoveX / imageWidth;
-			float normalizedY = (float)mouseMoveY / imageHeight;
+			int prevCenterX = previousTarget.box.x + previousTarget.box.width / 2;
+			int prevCenterY = previousTarget.box.y + previousTarget.box.height / 2;
 
-			// 정규화된 좌표를 각도 변화량으로 변환
-			float angleX = normalizedX * horizontalFOV / 2;
-			float angleY = normalizedY * verticalFOV / 2;
+			int velocityX = currentCenterX - prevCenterX;
+			int velocityY = currentCenterY - prevCenterY;
 
-			// 각도 변화량을 픽셀 변화량으로 변환 및 마우스 민감도 적용
-			float mouseSensitivity = 0.25f;
-			mouseMoveX = static_cast<int>((angleX * imageWidth / horizontalFOV) * mouseSensitivity);
-			mouseMoveY = static_cast<int>((angleY * imageHeight / verticalFOV) * mouseSensitivity);
+			// 선형 예측을 통해 움직이는 객체의 위치를 예측
+			int predictedCenterX = currentCenterX + static_cast<int>(velocityX * predictionOffset);
+			int predictedCenterY = currentCenterY + static_cast<int>(velocityY * predictionOffset);
 
-			// 프레임 기반 보정
-			// 목표에 도달하는 프레임 수를 설정
-			mouseMoveX = static_cast<int>(mouseMoveX / targetFrames);
-			mouseMoveY = static_cast<int>(mouseMoveY / targetFrames);
+			int targetDx = (predictedCenterX - centerWidth);
+			int targetDy = (predictedCenterY - centerHeight) - static_cast<int>(currentTarget.box.height * verticalOffset);
+
+			// 마우스가 이동할 최종 상대 좌표
+			int mouseMoveX = 0;
+			int mouseMoveY = 0;
+
+			// 데드존 밖에 객체가 있을 때만 이동량 계산
+			if (closestItemDistance > deadZoneRadius && closestItemDistance != 1.0E10)
+			{
+				// 민감도 적용
+				float moveX = static_cast<float>(targetDx) * sensitivity;
+				float moveY = static_cast<float>(targetDy) * sensitivity;
+
+				// 스무딩 적용
+				moveX = prevMouseMoveX + (moveX - prevMouseMoveX) * smoothing;
+				moveY = prevMouseMoveY + (moveY - prevMouseMoveY) * smoothing;
+
+				// 이동량 제한 (Clamping)
+				moveX = std::max(static_cast<float>(-maxMovementDistance), std::min(moveX, static_cast<float>(maxMovementDistance)));
+				moveY = std::max(static_cast<float>(-maxMovementDistance), std::min(moveY, static_cast<float>(maxMovementDistance)));
+
+				// 최종 이동량
+				mouseMoveX = static_cast<int>(moveX);
+				mouseMoveY = static_cast<int>(moveY);
+			}
+
+			// 현재 프레임에서 마우스 이동량 저장
+			prevMouseMoveX = mouseMoveX;
+			prevMouseMoveY = mouseMoveY;
 
 			// --- 객체 추적 ---
 			// SendInput 함수는 윈도우 전역으로 가상 이벤트를 발생시킴
 			// 따라서 현재 포커스된 윈도우에만 입력이 발생함
 			// 이때 무결성 수준이 낮거나 같은 프로그램에만 유효한 입력이 발생함
-			INPUT input = { 0 };
-			input.type = INPUT_MOUSE;
-			input.mi.dx = -mouseMoveX;
-			input.mi.dy = -mouseMoveY;
-
-			// AI가 켜져있으면
+			// 
+			// AI가 켜져있으면 컴퓨터를 제어
 			if (m_isAIOn.load())
 			{
-				// AI가 컴퓨터를 완전히 제어
-				// 화면 중앙과 객체의 위치가 충분히 가까우면
-				if (abs(mouseMoveX) + abs(mouseMoveY) < 10 && closestItemDistance != 1.0E10)
-				{
-					// 마우스 왼쪽 버튼 클릭 이벤트 (누름)
-					input.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-					SendInput(1, &input, sizeof(INPUT));
+				// 이동과 클릭을 위한 INPUT 구조체 배열
+				INPUT inputs[3] = { 0 }; // 0: Move, 1: LeftDown, 2: LeftUp
+				int inputCount = 0;
 
-					// 마우스 누름 이벤트의 확실한 작동을 위한 딜레이
-					for (int i = 0; i < 10; i++)
-						SendInput(1, &input, sizeof(INPUT));
+				// 마우스 이동 설정
+				inputs[inputCount].type = INPUT_MOUSE;
+				inputs[inputCount].mi.dx = mouseMoveX;
+				inputs[inputCount].mi.dy = mouseMoveY;
+				inputs[inputCount].mi.dwFlags = MOUSEEVENTF_MOVE;
+				inputCount++;
+
+				// 조준이 안정되었고, 타겟이 존재할 때 사격
+				bool isAimStable = (std::abs(mouseMoveX) + std::abs(mouseMoveY) < 5);
+				if (isAimStable && closestItemDistance != 1.0E10 && fireDelayCount > fireDelay)
+				{
+					ss << L"사격\n";
+					// 마우스 왼쪽 버튼 클릭 이벤트 (누름)
+					inputs[inputCount].type = INPUT_MOUSE;
+					inputs[inputCount].mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+					inputCount++;
+
+					// 마우스 왼쪽 버튼 클릭 이벤트 (뗌)
+					inputs[inputCount].type = INPUT_MOUSE;
+					inputs[inputCount].mi.dwFlags = MOUSEEVENTF_LEFTUP;
+					inputCount++;
+
+					fireDelayCount = 0;
+				}
+				else
+				{
+					fireDelayCount++;
 				}
 
-				// 마우스 이동
-				input.mi.dwFlags = MOUSEEVENTF_MOVE;
-				SendInput(1, &input, sizeof(INPUT));
-
-				// 화면 중앙과 객체의 위치가 충분히 멀면
-				if (abs(mouseMoveX) + abs(mouseMoveY) > 10)
+				// 준비된 입력들을 한번에 전송
+				if (inputCount > 0)
 				{
-					// 마우스 왼쪽 버튼 클릭 이벤트 (뗌)
-					input.mi.dwFlags = MOUSEEVENTF_LEFTUP;
-					SendInput(1, &input, sizeof(INPUT));
+					SendInput(inputCount, inputs, sizeof(INPUT));
 				}
 			}
+
+			// 디버그용 코드
+			ss << L"최종 이동량: " << mouseMoveX << L", " << mouseMoveY << "\n";
+			switch (whatHappend)
+			{
+			case 1: ss << L"계속 추적\n"; break;
+			case 2: ss << L"새로 추적\n"; break;
+			case 3: ss << L"놓침\n"; break;
+			case 4: ss << L"놓쳐서 새로 추적\n"; break;
+			}
+			OutputDebugString(ss.str().c_str());
+			whatHappend = 0;
 		}
 	}
 }
