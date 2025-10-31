@@ -450,14 +450,15 @@ namespace winrt::ExtraVisionApp1::implementation
 
 		std::vector<Detection> lastDetectedObjects; // 마지막으로 가져온 객체 정보
 
-		float sensitivity = 0.04f;					// 민감도
-		float deadZoneRadius = 8.0f;				// 데드존 반경
+		float sensitivity = 0.02f;					// 민감도
+		float deadZoneRadius = 4.0f;				// 데드존 반경
 		float smoothing = 0.8f;						// 움직임을 부드럽게 만듬
 		int prevMouseMoveX = 0;						// 이전 마우스 X좌표
 		int prevMouseMoveY = 0;						// 이전 마우스 Y좌표
 		int maxMovementDistance = 300;				// 한 프레임에 이동할 최대 이동량
 		float verticalOffset = 0.275f;				// 객체의 어느 부분을 조준할지
-		float predictionOffset = 2.0f;				// 얼마나 멀리 예측할지
+		float verticalPredictionOffset = 1.0f;		// 수직으로 얼마나 멀리 예측할지
+		float horizontalPredictionOffset = 2.0f;	// 수평으로 얼마나 멀리 예측할지
 
 		// --- '기억'을 위한 변수 추가 ---
 		bool isCurrentlyTracking = false;			// 현재 특정 객체를 추적 중인지 여부
@@ -471,7 +472,7 @@ namespace winrt::ExtraVisionApp1::implementation
 		int frameToleranceCount = 0;
 
 		// 사격 딜레이
-		const int fireDelay = 4;
+		const int fireDelay = 8;
 		int fireDelayCount = 0;
 
 		while (m_shouldExit.load() == false)
@@ -615,8 +616,8 @@ namespace winrt::ExtraVisionApp1::implementation
 			int velocityY = currentCenterY - prevCenterY;
 
 			// 선형 예측을 통해 움직이는 객체의 위치를 예측
-			int predictedCenterX = currentCenterX + static_cast<int>(velocityX * predictionOffset);
-			int predictedCenterY = currentCenterY + static_cast<int>(velocityY * predictionOffset);
+			int predictedCenterX = currentCenterX + static_cast<int>(velocityX * horizontalPredictionOffset);
+			int predictedCenterY = currentCenterY + static_cast<int>(velocityY * verticalPredictionOffset);
 
 			int targetDx = (predictedCenterX - centerWidth);
 			int targetDy = (predictedCenterY - centerHeight) - static_cast<int>(currentTarget.box.height * verticalOffset);
